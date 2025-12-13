@@ -1,14 +1,18 @@
-use serde_core::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeSeq, de::{self, Visitor, SeqAccess}};
-use core::marker::PhantomData;
-use alloc::format;
 use crate::{AutoVec, StackVec};
-
+use alloc::format;
+use core::marker::PhantomData;
+use serde_core::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, SeqAccess, Visitor},
+    ser::SerializeSeq,
+};
 
 impl<T: Serialize, const N: usize> Serialize for StackVec<T, N> {
     /// Serialize a `StackVec` as a sequence.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer {
+        S: Serializer,
+    {
         let mut seq = serializer.serialize_seq(Some(self.len()))?;
         for element in self {
             seq.serialize_element(element)?;
@@ -19,11 +23,12 @@ impl<T: Serialize, const N: usize> Serialize for StackVec<T, N> {
 
 impl<T: Serialize, const N: usize> Serialize for AutoVec<T, N> {
     /// Serialize an `AutoVec` as a sequence.
-    /// 
+    ///
     /// The serialization format is identical whether the data is stored on the stack or heap.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer {
+        S: Serializer,
+    {
         let mut seq = serializer.serialize_seq(Some(self.len()))?;
         for element in self {
             seq.serialize_element(element)?;
@@ -34,12 +39,13 @@ impl<T: Serialize, const N: usize> Serialize for AutoVec<T, N> {
 
 impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for AutoVec<T, N> {
     /// Deserialize an `AutoVec` from a sequence.
-    /// 
+    ///
     /// If the sequence length exceeds the stack capacity `N`, the data will be stored on the heap.
     #[inline]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de> {
+        D: Deserializer<'de>,
+    {
         struct AutoVecVisitor<T, const N: usize> {
             _marker: PhantomData<T>,
         }
@@ -76,13 +82,14 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for AutoVec<T, N
 
 impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for StackVec<T, N> {
     /// Deserialize a `StackVec` from a sequence.
-    /// 
+    ///
     /// # Panics
     /// Panics if the sequence length exceeds the stack capacity `N`.
     #[inline]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de> {
+        D: Deserializer<'de>,
+    {
         struct StackVecVisitor<T, const N: usize> {
             _marker: PhantomData<T>,
         }
@@ -130,10 +137,9 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for StackVec<T, 
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use crate::{StackVec, AutoVec, stackvec, autovec};
+    use crate::{AutoVec, StackVec, autovec, stackvec};
 
     #[test]
     fn stackvec_json() {

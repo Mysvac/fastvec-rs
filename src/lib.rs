@@ -26,7 +26,7 @@
 //! # use fastvec::StackVec;
 //! let mut vec: StackVec<i32, 10> = StackVec::new();
 //! assert_eq!(vec.capacity(), 10);
-//! 
+//!
 //! vec.push(1);
 //! vec.push(2);
 //! assert_eq!(vec.len(), 2);
@@ -44,7 +44,7 @@
 //! # use fastvec::{AutoVec, autovec};
 //! let mut vec: AutoVec<i32, 5> = autovec![1, 2, 3];
 //! assert!(vec.in_stack());  // Still on stack
-//! 
+//!
 //! // Push beyond capacity—automatically migrates to heap
 //! vec.extend(&[4, 5, 6, 7, 8]);
 //! assert!(!vec.in_stack()); // Now on heap
@@ -52,7 +52,7 @@
 //!
 //! Note: When the amount of data is large, this is not as good as [`Vec`]
 //! because its operation usually requires an additional judgment.
-//! 
+//!
 //! ## Comparison
 //!
 //! | Feature | StackVec | AutoVec | SmallVec | Vec |
@@ -62,24 +62,24 @@
 //! | Speed | A | B | B | B~C |
 //!
 //! See detailed documentation in [`StackVec`] and [`AutoVec`] for method signatures and examples.
-//! 
+//!
 //! ### Alias
-//! 
+//!
 //! - [`MiniVec<T>`] = `AutoVec<T, 8>` — for tiny collections
 //! - [`FastVec<T>`] = `AutoVec<T, 16>` — general-purpose balance
-//! 
+//!
 //! ## `no_std` support
 //!
 //! This crate requires only `core` and `alloc`, making it suitable for embedded and no_std environments.
-//! 
+//!
 //! ## Optional features
 //!
 //! ### `serde`
-//! 
+//!
 //! When this optional dependency is enabled,
 //! [`StackVec`] and [`AutoVec`] implements the [`serde::Serialize`] and [`serde::Deserialize`] traits.
 //!
-//! 
+//!
 //! [`serde::Serialize`]: https://docs.rs/smallvec/latest/serde
 //! [`serde::Deserialize`]: https://docs.rs/smallvec/latest/serde
 //! [`SmallVec`]: https://docs.rs/smallvec/latest/smallvec
@@ -103,26 +103,26 @@ pub mod auto_vec;
 pub use auto_vec::AutoVec;
 
 /// A small `AutoVec` with a stack capacity of 8 elements.
-/// 
+///
 /// This is an alias for [`AutoVec<T, 8>`].
-/// 
+///
 /// `MiniVec` is optimized for scenarios where you expect small collections most of the time,
 /// typically 8 or fewer elements. It provides zero-cost stack allocation for small data
 /// and automatically spills to the heap when capacity is exceeded.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```
 /// # use fastvec::MiniVec;
 /// let mut vec: MiniVec<i32> = MiniVec::new();
-/// 
+///
 /// // Small collections stay on the stack with no heap allocation
 /// vec.push(1);
 /// vec.push(2);
 /// vec.push(3);
 /// assert!(vec.in_stack());
 /// assert_eq!(vec, [1, 2, 3]);
-/// 
+///
 /// // Exceeding capacity automatically moves to heap
 /// vec.extend(&[4, 5, 6, 7, 8, 9]);
 /// assert!(!vec.in_stack());
@@ -131,36 +131,34 @@ pub use auto_vec::AutoVec;
 pub type MiniVec<T> = AutoVec<T, 8>;
 
 /// A fast `AutoVec` with a stack capacity of 16 elements.
-/// 
+///
 /// This is an alias for [`AutoVec<T, 16>`].
-/// 
+///
 /// `FastVec` is a balanced choice between stack efficiency and flexibility,
 /// suitable for most general-purpose use cases. It can hold 16 elements on the stack
 /// before spilling to the heap, making it ideal for collections that frequently stay small
 /// but occasionally grow larger.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```
 /// # use fastvec::FastVec;
 /// let mut vec: FastVec<String> = FastVec::new();
-/// 
+///
 /// // Moderate collections typically remain on the stack
 /// vec.push("hello".to_string());
 /// vec.push("world".to_string());
 /// assert!(vec.in_stack());
-/// 
+///
 /// // Can be extended up to 16 elements without heap allocation
 /// for i in 0..14 {
 ///     vec.push(format!("item_{}", i));
 /// }
 /// assert!(vec.in_stack());
 /// assert_eq!(vec.len(), 16);
-/// 
+///
 /// // Beyond 16 elements, automatically uses heap
 /// vec.push("beyond".to_string());
 /// assert!(!vec.in_stack());
 /// ```
 pub type FastVec<T> = AutoVec<T, 16>;
-
-
