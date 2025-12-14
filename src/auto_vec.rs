@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, vec::Vec};
-use core::{fmt::Debug, iter::FusedIterator, ptr};
+use core::{fmt, iter::FusedIterator, ptr};
 
 use crate::StackVec;
 
@@ -127,6 +127,29 @@ impl<T, const N: usize> AutoVec<T, N> {
         Self(InnerVec::Stack(StackVec::new()))
     }
 
+    /// Modify the stack capacity of the container.
+    ///
+    /// This function does not move heap data to the stack.
+    /// But it is possible to move stack data to the heap (if the capacity is insufficient).
+    ///
+    /// Unlike [`StackVec::force_cast`], this function will not delete data.
+    #[inline]
+    pub fn force_cast<const P: usize>(self) -> AutoVec<T, P> {
+        match self.0 {
+            InnerVec::Stack(mut stack_vec) => {
+                let len = stack_vec.len();
+                let mut res = <AutoVec<T, P>>::with_capacity(len);
+                unsafe {
+                    ptr::copy_nonoverlapping(stack_vec.as_ptr(), res.as_mut_ptr(), len);
+                    res.set_len(len);
+                    stack_vec.set_len(0);
+                }
+                res
+            }
+            InnerVec::Heap(items) => AutoVec::<T, P>(InnerVec::Heap(items)),
+        }
+    }
+
     /// Return `true` if the data is stored on stack.
     ///
     /// # Example
@@ -246,7 +269,7 @@ impl<T, const N: usize> AutoVec<T, N> {
     #[inline]
     pub fn force_to_heap(&mut self) -> &mut Vec<T> {
         if let InnerVec::Stack(vec) = &mut self.0 {
-            self.0 = InnerVec::Heap(vec.into_vec_exact());
+            self.0 = InnerVec::Heap(vec.into_vec());
         }
         match &mut self.0 {
             InnerVec::Heap(vec) => vec,
@@ -279,7 +302,8 @@ impl<T, const N: usize> AutoVec<T, N> {
             match &mut self.0 {
                 InnerVec::Stack(vec) => {
                     // SAFETY: capacity >= len
-                    self.0 = InnerVec::Heap(unsafe { vec.into_vec_uncheck(capacity) });
+                    self.0 =
+                        InnerVec::Heap(unsafe { vec.into_vec_with_capacity_uncheck(capacity) });
                 }
                 InnerVec::Heap(vec) => vec.reserve(additional),
             }
@@ -317,7 +341,8 @@ impl<T, const N: usize> AutoVec<T, N> {
             match &mut self.0 {
                 InnerVec::Stack(vec) => {
                     // SAFETY: Ensure that the capacity is greater than the length.
-                    self.0 = InnerVec::Heap(unsafe { vec.into_vec_uncheck(capacity) });
+                    self.0 =
+                        InnerVec::Heap(unsafe { vec.into_vec_with_capacity_uncheck(capacity) });
                 }
                 InnerVec::Heap(vec) => vec.reserve_exact(additional),
             }
@@ -442,11 +467,28 @@ impl<T, const N: usize> AutoVec<T, N> {
     ///
     /// If the data is in the stack, the exact memory will be allocated.
     /// If the data is in the heap, will not reallocate memory.
+    ///
+    /// Therefore, this function is efficient, but the returned [`Vec`] may not be tight.
     #[inline]
     pub fn into_vec(self) -> Vec<T> {
         match self.0 {
-            InnerVec::Stack(mut vec) => vec.into_vec_exact(),
+            InnerVec::Stack(mut vec) => vec.into_vec(),
             InnerVec::Heap(vec) => vec,
+        }
+    }
+
+    /// Convert [`AutoVec`] to [`Vec`].
+    ///
+    /// If the data is in the stack, the exact memory will be allocated.
+    /// If the data is in the heap, [`Vec::shrink_to_fit`] will be called.
+    #[inline]
+    pub fn shrink_into_vec(self) -> Vec<T> {
+        match self.0 {
+            InnerVec::Stack(mut vec) => vec.into_vec(),
+            InnerVec::Heap(mut vec) => {
+                vec.shrink_to_fit();
+                vec
+            }
         }
     }
 
@@ -463,21 +505,6 @@ impl<T, const N: usize> AutoVec<T, N> {
         match self.0 {
             InnerVec::Stack(vec) => vec,
             _ => unreachable!(),
-        }
-    }
-
-    /// Convert [`AutoVec`] to [`Vec`].
-    ///
-    /// If the data is in the stack, the exact memory will be allocated.
-    /// If the data is in the heap, [`Vec::shrink_to_fit`] will be called.
-    #[inline]
-    pub fn into_vec_exact(self) -> Vec<T> {
-        match self.0 {
-            InnerVec::Stack(mut vec) => vec.into_vec_exact(),
-            InnerVec::Heap(mut vec) => {
-                vec.shrink_to_fit();
-                vec
-            }
         }
     }
 
@@ -581,15 +608,18 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// assert_eq!(vec, ['a', 'd', 'b', 'c', 'e']);
     /// assert!(!vec.in_stack());
     /// ```
+    #[inline]
     pub fn insert(&mut self, index: usize, element: T) {
         match &mut self.0 {
             InnerVec::Stack(vec) => {
-                if N > vec.len() {
-                    vec.insert(index, element);
+                assert!(index <= vec.len(), "insertion index should be <= len");
+                if vec.len() < N {
+                    // SAFETY: index <= len && len < N
+                    unsafe {
+                        vec.insert_uncheck(index, element);
+                    }
                 } else {
-                    assert!(index <= N, "insertion index should be <= len");
-
-                    let mut new_vec: Vec<T> = Vec::with_capacity(N + { N >> 1 } + 3);
+                    let mut new_vec: Vec<T> = Vec::with_capacity(N + { N >> 1 } + 4);
                     let dst_ptr = new_vec.as_mut_ptr();
                     let src_ptr = vec.as_ptr();
                     // SAFETY: enough capacity and valid data.
@@ -601,7 +631,6 @@ impl<T, const N: usize> AutoVec<T, N> {
                             dst_ptr.add(index + 1),
                             N - index,
                         );
-
                         vec.set_len(0);
                         new_vec.set_len(N + 1);
                     }
@@ -701,14 +730,13 @@ impl<T, const N: usize> AutoVec<T, N> {
                     // SAFETY: len < N
                     unsafe { vec.push_uncheck(value) };
                 } else {
-                    let mut new_vec: Vec<T> = Vec::with_capacity(N + { N >> 1 } + 3);
+                    let mut new_vec: Vec<T> = Vec::with_capacity(N + { N >> 1 } + 4);
                     let dst_ptr = new_vec.as_mut_ptr();
                     let src_ptr = vec.as_ptr();
                     // SAFETY: enough capacity and valid data.
                     unsafe {
                         ptr::copy_nonoverlapping(src_ptr, dst_ptr, N);
                         ptr::write(dst_ptr.add(N), value);
-
                         vec.set_len(0);
                         new_vec.set_len(N + 1);
                     }
@@ -817,37 +845,6 @@ impl<T, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Removes the subslice indicated by the given range from the vector,
-    /// returning a double-ended iterator over the removed subslice.
-    ///
-    /// # Panics
-    /// Panics if the range has `start_bound > end_bound`, or,
-    /// if the range is bounded on either end and past the length of the vector.
-    ///
-    /// # Leaking
-    /// If the returned iterator goes out of scope without being dropped (due to [`core::mem::forget`], for example),
-    /// the vector may have lost and leaked elements arbitrarily, including elements outside the range.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use fastvec::{AutoVec, autovec};
-    /// let mut v: AutoVec<_, 4> = autovec![1, 2, 3];
-    /// let u: Vec<_> = v.drain(1..).collect();
-    /// assert_eq!(v.as_slice(), [1]);
-    /// assert_eq!(u, [2, 3]);
-    ///
-    /// v.drain(..);
-    /// assert_eq!(v.as_slice(), &[]);
-    /// ```
-    #[inline]
-    pub fn drain<R: core::ops::RangeBounds<usize>>(&mut self, range: R) -> Drain<'_, T, N> {
-        match &mut self.0 {
-            InnerVec::Stack(vec) => Drain::Stack(vec.drain(range)),
-            InnerVec::Heap(vec) => Drain::Heap(vec.drain(range)),
-        }
-    }
-
     /// Clears the vector, removing all values.
     ///
     /// Note that this method has no effect on the allocated capacity of the vector.
@@ -927,7 +924,7 @@ impl<T, const N: usize> AutoVec<T, N> {
                     vec.resize_with(new_len, f);
                 } else {
                     // SAFETY: capacity = new_len > len
-                    let mut vec = unsafe { vec.into_vec_uncheck(new_len) };
+                    let mut vec = unsafe { vec.into_vec_with_capacity_uncheck(new_len) };
                     vec.resize_with(new_len, f);
                     self.0 = InnerVec::Heap(vec);
                 }
@@ -958,54 +955,6 @@ impl<T, const N: usize> AutoVec<T, N> {
         }
     }
 }
-
-/// An iterator that removes the items from a [`AutoVec`] and yields them by value.
-pub enum Drain<'a, T: 'a, const N: usize> {
-    Stack(crate::stack_vec::Drain<'a, T, N>),
-    Heap(alloc::vec::Drain<'a, T>),
-}
-
-impl<'a, T: 'a, const N: usize> Iterator for Drain<'a, T, N> {
-    type Item = T;
-
-    #[inline]
-    fn next(&mut self) -> Option<T> {
-        match self {
-            Drain::Stack(drain) => drain.next(),
-            Drain::Heap(drain) => drain.next(),
-        }
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Drain::Stack(drain) => drain.size_hint(),
-            Drain::Heap(drain) => drain.size_hint(),
-        }
-    }
-}
-
-impl<'a, T: 'a, const N: usize> DoubleEndedIterator for Drain<'a, T, N> {
-    #[inline]
-    fn next_back(&mut self) -> Option<T> {
-        match self {
-            Drain::Stack(drain) => drain.next_back(),
-            Drain::Heap(drain) => drain.next_back(),
-        }
-    }
-}
-
-impl<T, const N: usize> ExactSizeIterator for Drain<'_, T, N> {
-    #[inline]
-    fn len(&self) -> usize {
-        match self {
-            Drain::Stack(drain) => drain.len(),
-            Drain::Heap(drain) => drain.len(),
-        }
-    }
-}
-
-impl<T, const N: usize> FusedIterator for Drain<'_, T, N> {}
 
 impl<T: Clone, const N: usize> AutoVec<T, N> {
     /// Creates an `AutoVec` with `num` copies of `elem`.
@@ -1073,7 +1022,7 @@ impl<T: Clone, const N: usize> AutoVec<T, N> {
                     vec.resize(new_len, value);
                 } else {
                     // SAFETY: capacity == new_len > len
-                    let mut vec = unsafe { vec.into_vec_uncheck(new_len) };
+                    let mut vec = unsafe { vec.into_vec_with_capacity_uncheck(new_len) };
                     vec.resize(new_len, value);
                     self.0 = InnerVec::Heap(vec);
                 }
@@ -1100,7 +1049,7 @@ impl<T: Clone, const N: usize> AutoVec<T, N> {
                     vec.extend_from_slice(other);
                 } else {
                     // SAFETY: capacity == new_len > len
-                    let mut vec = unsafe { vec.into_vec_uncheck(capacity) };
+                    let mut vec = unsafe { vec.into_vec_with_capacity_uncheck(capacity) };
                     vec.extend_from_slice(other);
                     self.0 = InnerVec::Heap(vec);
                 }
@@ -1120,7 +1069,7 @@ impl<T: Clone, const N: usize> AutoVec<T, N> {
                     vec.extend_from_within(src);
                 } else {
                     // SAFETY: capacity == new_len > len
-                    let mut vec = unsafe { vec.into_vec_uncheck(capacity) };
+                    let mut vec = unsafe { vec.into_vec_with_capacity_uncheck(capacity) };
                     vec.extend_from_within(src);
                     self.0 = InnerVec::Heap(vec);
                 }
@@ -1173,7 +1122,7 @@ impl<T, const N: usize, const P: usize> AutoVec<[T; P], N> {
                 if S >= P * vec.len() {
                     vec.into_flattened::<S>().into()
                 } else {
-                    vec.into_vec_exact().into_flattened().into()
+                    vec.into_vec().into_flattened().into()
                 }
             }
             InnerVec::Heap(vec) => {
@@ -1241,7 +1190,7 @@ impl<'a, T: Clone, const N: usize> From<&'a AutoVec<T, N>> for alloc::borrow::Co
 
 impl<'a, T: Clone, const N: usize> From<AutoVec<T, N>> for alloc::borrow::Cow<'a, [T]> {
     fn from(v: AutoVec<T, N>) -> alloc::borrow::Cow<'a, [T]> {
-        alloc::borrow::Cow::Owned(v.into_vec_exact())
+        alloc::borrow::Cow::Owned(v.into_vec())
     }
 }
 
@@ -1337,6 +1286,23 @@ pub enum IntoIter<T, const N: usize> {
     Heap(alloc::vec::IntoIter<T>),
 }
 
+impl<T, const N: usize> IntoIter<T, N> {
+    #[inline]
+    pub fn as_slice(&self) -> &[T] {
+        match self {
+            IntoIter::Stack(iter) => iter.as_slice(),
+            IntoIter::Heap(iter) => iter.as_slice(),
+        }
+    }
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        match self {
+            IntoIter::Stack(iter) => iter.as_mut_slice(),
+            IntoIter::Heap(iter) => iter.as_mut_slice(),
+        }
+    }
+}
+
 impl<T, const N: usize> Iterator for IntoIter<T, N> {
     type Item = T;
     #[inline]
@@ -1370,31 +1336,326 @@ impl<T, const N: usize> ExactSizeIterator for IntoIter<T, N> {}
 
 impl<T, const N: usize> FusedIterator for IntoIter<T, N> {}
 
-impl<T, const N: usize> IntoIter<T, N> {
-    #[inline]
-    pub fn as_slice(&self) -> &[T] {
-        match self {
-            IntoIter::Stack(iter) => iter.as_slice(),
-            IntoIter::Heap(iter) => iter.as_slice(),
-        }
-    }
-    #[inline]
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
-        match self {
-            IntoIter::Stack(iter) => iter.as_mut_slice(),
-            IntoIter::Heap(iter) => iter.as_mut_slice(),
-        }
-    }
-}
-
 impl<T, const N: usize> Default for IntoIter<T, N> {
     fn default() -> Self {
         Self::Stack(crate::stack_vec::IntoIter::default())
     }
 }
 
-impl<T: Debug, const N: usize> Debug for IntoIter<T, N> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        Debug::fmt(self.as_slice(), f)
+impl<T: fmt::Debug, const N: usize> fmt::Debug for IntoIter<T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("IntoIter").field(&self.as_slice()).finish()
+    }
+}
+
+/// An iterator that removes the items from a [`AutoVec`] and yields them by value.
+///
+/// See [`AutoVec::drain`] .
+pub enum Drain<'a, T: 'a, const N: usize> {
+    Stack(crate::stack_vec::Drain<'a, T, N>),
+    Heap(alloc::vec::Drain<'a, T>),
+}
+
+impl<T, const N: usize> AutoVec<T, N> {
+    /// Removes the subslice indicated by the given range from the vector,
+    /// returning a double-ended iterator over the removed subslice.
+    ///
+    /// # Panics
+    /// Panics if the range has `start_bound > end_bound`, or,
+    /// if the range is bounded on either end and past the length of the vector.
+    ///
+    /// # Leaking
+    /// If the returned iterator goes out of scope without being dropped (due to [`core::mem::forget`], for example),
+    /// the vector may have lost and leaked elements arbitrarily, including elements outside the range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut v: AutoVec<_, 4> = autovec![1, 2, 3];
+    /// let u: Vec<_> = v.drain(1..).collect();
+    /// assert_eq!(v.as_slice(), [1]);
+    /// assert_eq!(u, [2, 3]);
+    ///
+    /// v.drain(..);
+    /// assert_eq!(v.as_slice(), &[]);
+    /// ```
+    #[inline]
+    pub fn drain<R: core::ops::RangeBounds<usize>>(&mut self, range: R) -> Drain<'_, T, N> {
+        match &mut self.0 {
+            InnerVec::Stack(vec) => Drain::Stack(vec.drain(range)),
+            InnerVec::Heap(vec) => Drain::Heap(vec.drain(range)),
+        }
+    }
+}
+
+impl<T, const N: usize> Drain<'_, T, N> {
+    #[inline]
+    pub fn as_slice(&self) -> &[T] {
+        match &self {
+            Drain::Stack(drain) => drain.as_slice(),
+            Drain::Heap(drain) => drain.as_slice(),
+        }
+    }
+}
+
+impl<T, const N: usize> AsRef<[T]> for Drain<'_, T, N> {
+    #[inline]
+    fn as_ref(&self) -> &[T] {
+        match &self {
+            Drain::Stack(drain) => drain.as_ref(),
+            Drain::Heap(drain) => drain.as_ref(),
+        }
+    }
+}
+
+impl<T: fmt::Debug, const N: usize> fmt::Debug for Drain<'_, T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Drain").field(&self.as_slice()).finish()
+    }
+}
+
+impl<T, const N: usize> Iterator for Drain<'_, T, N> {
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<T> {
+        match self {
+            Drain::Stack(drain) => drain.next(),
+            Drain::Heap(drain) => drain.next(),
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Drain::Stack(drain) => drain.size_hint(),
+            Drain::Heap(drain) => drain.size_hint(),
+        }
+    }
+}
+
+impl<T, const N: usize> DoubleEndedIterator for Drain<'_, T, N> {
+    #[inline]
+    fn next_back(&mut self) -> Option<T> {
+        match self {
+            Drain::Stack(drain) => drain.next_back(),
+            Drain::Heap(drain) => drain.next_back(),
+        }
+    }
+}
+
+impl<T, const N: usize> ExactSizeIterator for Drain<'_, T, N> {
+    #[inline]
+    fn len(&self) -> usize {
+        match self {
+            Drain::Stack(drain) => drain.len(),
+            Drain::Heap(drain) => drain.len(),
+        }
+    }
+}
+
+impl<T, const N: usize> FusedIterator for Drain<'_, T, N> {}
+
+/// A splicing iterator for [`AutoVec`].
+///
+/// See [`AutoVec::splice`] .
+pub enum Splice<'a, I: ExactSizeIterator + 'a, const N: usize> {
+    Stack(crate::stack_vec::Splice<'a, I, N>),
+    Heap(alloc::vec::Splice<'a, I>),
+}
+
+impl<T, const N: usize> AutoVec<T, N> {
+    /// Creates a splicing iterator that replaces the specified range in the vector
+    /// with the given `replace_with` iterator and yields the removed items.
+    /// `replace_with` does not need to be the same length as `range`.
+    ///
+    /// See more infomation in [`alloc::vec::Splice`], the only difference is that
+    /// we require the `replace_with` is [`ExactSizeIterator`]`.
+    ///
+    /// This is optimal if:
+    ///
+    /// * The tail (elements in the vector after `range`) is empty,
+    /// * or `replace_with` yields fewer or equal elements than `range`'s length
+    ///
+    /// If the capacity is insufficient, this will first switch to the heap and then call splice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{autovec, AutoVec};
+    /// let mut v: AutoVec<_, 4> = autovec![1, 2, 3, 4];
+    /// let new = [7, 8, 9];
+    /// let u: Vec<_> = v.splice(1..3, new).collect();
+    ///
+    /// assert!(!v.in_stack());
+    /// assert_eq!(v, [1, 7, 8, 9, 4]);
+    /// assert_eq!(u, [2, 3]);
+    /// ```
+    ///
+    /// Using `splice` to insert new items into a vector efficiently at a specific position
+    /// indicated by an empty range:
+    ///
+    /// ```
+    /// # use fastvec::{autovec, AutoVec};
+    /// let mut v: AutoVec<_, 5> = autovec![1, 5];
+    /// let new = [2, 3, 4];
+    /// v.splice(1..1, new);
+    /// assert_eq!(v, [1, 2, 3, 4, 5]);
+    /// ```
+    pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Splice<'_, I::IntoIter, N>
+    where
+        R: core::ops::RangeBounds<usize>,
+        I: IntoIterator<Item = T>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let iter = replace_with.into_iter();
+        let len = self.len();
+        let (start, end) = crate::utils::split_range_bound(&range, len);
+        let capacity = len - end + start + iter.len();
+
+        if capacity > N {
+            Splice::Heap(self.force_to_heap().splice(range, iter))
+        } else {
+            match &mut self.0 {
+                InnerVec::Stack(vec) => Splice::Stack(vec.splice(range, iter)),
+                InnerVec::Heap(vec) => Splice::Heap(vec.splice(range, iter)),
+            }
+        }
+    }
+}
+
+impl<I: ExactSizeIterator, const N: usize> Iterator for Splice<'_, I, N> {
+    type Item = I::Item;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Splice::Stack(splice) => splice.next(),
+            Splice::Heap(splice) => splice.next(),
+        }
+    }
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Splice::Stack(splice) => splice.size_hint(),
+            Splice::Heap(splice) => splice.size_hint(),
+        }
+    }
+}
+
+impl<I: ExactSizeIterator, const N: usize> DoubleEndedIterator for Splice<'_, I, N> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self {
+            Splice::Stack(splice) => splice.next_back(),
+            Splice::Heap(splice) => splice.next_back(),
+        }
+    }
+}
+
+impl<I: ExactSizeIterator, const N: usize> ExactSizeIterator for Splice<'_, I, N> {
+    #[inline]
+    fn len(&self) -> usize {
+        match self {
+            Splice::Stack(splice) => splice.len(),
+            Splice::Heap(splice) => splice.len(),
+        }
+    }
+}
+
+impl<I: fmt::Debug + ExactSizeIterator, const N: usize> fmt::Debug for Splice<'_, I, N>
+where
+    I::Item: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stack(splice) => fmt::Debug::fmt(splice, f),
+            Self::Heap(splice) => fmt::Debug::fmt(splice, f),
+        }
+    }
+}
+
+/// An iterator which uses a closure to determine if an element should be removed.
+///
+/// See [`AutoVec::extract_if`] .
+pub enum ExtractIf<'a, T, F: FnMut(&mut T) -> bool, const N: usize> {
+    Stack(crate::stack_vec::ExtractIf<'a, T, F, N>),
+    Heap(alloc::vec::ExtractIf<'a, T, F>),
+}
+
+impl<T, const N: usize> AutoVec<T, N> {
+    /// Creates an iterator which uses a closure to determine if an element in the range should be removed.
+    ///
+    /// See more infomation in [`Vec::extract_if`] .
+    ///
+    /// # Panics
+    ///
+    /// If `range` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// Splitting a vector into even and odd values, reusing the original vector:
+    ///
+    /// ```
+    /// # use fastvec::{autovec, AutoVec};
+    /// let mut numbers: AutoVec<_, 20> = autovec![1, 2, 3, 4, 5, 6, 8, 9, 11, 13, 14, 15];
+    ///
+    /// let evens = numbers.extract_if(.., |x| *x % 2 == 0).collect::<AutoVec<_, 10>>();
+    /// let odds = numbers;
+    ///
+    /// assert_eq!(evens, [2, 4, 6, 8, 14]);
+    /// assert_eq!(odds, [1, 3, 5, 9, 11, 13, 15]);
+    /// ```
+    ///
+    /// Using the range argument to only process a part of the vector:
+    ///
+    /// ```
+    /// # use fastvec::{autovec, AutoVec};
+    /// let mut items: AutoVec<_, 15> = autovec![0, 0, 0, 0, 0, 0, 0, 1, 2, 1, 2, 1, 2];
+    /// let ones = items.extract_if(7.., |x| *x == 1).collect::<Vec<_>>();
+    /// assert_eq!(items, [0, 0, 0, 0, 0, 0, 0, 2, 2, 2]);
+    /// assert_eq!(ones.len(), 3);
+    /// ```
+    pub fn extract_if<F, R>(&mut self, range: R, filter: F) -> ExtractIf<'_, T, F, N>
+    where
+        F: FnMut(&mut T) -> bool,
+        R: core::ops::RangeBounds<usize>,
+    {
+        match &mut self.0 {
+            InnerVec::Stack(vec) => ExtractIf::Stack(vec.extract_if(range, filter)),
+            InnerVec::Heap(vec) => ExtractIf::Heap(vec.extract_if(range, filter)),
+        }
+    }
+}
+
+impl<T, F: FnMut(&mut T) -> bool, const N: usize> Iterator for ExtractIf<'_, T, F, N> {
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ExtractIf::Stack(extract_if) => extract_if.next(),
+            ExtractIf::Heap(extract_if) => extract_if.next(),
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            ExtractIf::Stack(extract_if) => extract_if.size_hint(),
+            ExtractIf::Heap(extract_if) => extract_if.size_hint(),
+        }
+    }
+}
+
+impl<T: fmt::Debug, F: FnMut(&mut T) -> bool, const N: usize> fmt::Debug
+    for ExtractIf<'_, T, F, N>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExtractIf::Stack(extract_if) => fmt::Debug::fmt(extract_if, f),
+            ExtractIf::Heap(extract_if) => fmt::Debug::fmt(extract_if, f),
+        }
     }
 }

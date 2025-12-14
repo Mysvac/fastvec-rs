@@ -148,16 +148,6 @@ macro_rules! impl_commen_traits {
             }
         }
 
-        impl<T, U, const N: usize, const P: usize> core::cmp::PartialEq<&[U; P]> for $name
-        where
-            T: core::cmp::PartialEq<U>,
-        {
-            #[inline]
-            fn eq(&self, other: &&[U; P]) -> bool {
-                core::cmp::PartialEq::eq(self.as_slice(), other.as_slice())
-            }
-        }
-
         impl<T, U, const N: usize> core::cmp::PartialEq<&mut [U]> for $name
         where
             T: core::cmp::PartialEq<U>,
@@ -165,6 +155,16 @@ macro_rules! impl_commen_traits {
             #[inline]
             fn eq(&self, other: &&mut [U]) -> bool {
                 core::cmp::PartialEq::eq(self.as_slice(), *other)
+            }
+        }
+
+        impl<T, U, const N: usize, const P: usize> core::cmp::PartialEq<&[U; P]> for $name
+        where
+            T: core::cmp::PartialEq<U>,
+        {
+            #[inline]
+            fn eq(&self, other: &&[U; P]) -> bool {
+                core::cmp::PartialEq::eq(self.as_slice(), other.as_slice())
             }
         }
 

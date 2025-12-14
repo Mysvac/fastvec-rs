@@ -3,7 +3,7 @@
 A high-performance vector library that stores small collections on the stack
 and automatically spills to the heap when needed.
 
-Similar to [`SmallVec`], but we split the responsibility into two distinct containers instead of on.
+Similar to `SmallVec`, but we split the responsibility into two distinct containers instead of one.
 
 Many workloads have small collections that fit comfortably in a fixed-size stack buffer,
 but occasionally need to grow larger. Stack allocation is much faster than heap allocation,
@@ -14,7 +14,7 @@ only when necessary—with zero cost for the common case.
 
 ## Containers
 
-### [`StackVec`]
+### `StackVec`
 
 - **Fixed capacity** on the stack
 - **Array-like** performance
@@ -33,7 +33,7 @@ assert_eq!(vec.len(), 2);
 // Cannot push more than 10 items (will panic)
 ```
 
-### [`AutoVec`]
+### `AutoVec`
 
 - **Flexible capacity**: stack initially, heap when needed
 - **Enum-based**: internally either `StackVec` or `Vec`
@@ -65,8 +65,8 @@ See detailed documentation in [`StackVec`] and [`AutoVec`] for method signatures
 
 ### Alias
 
-- [`MiniVec<T>`] = `AutoVec<T, 8>` — for tiny collections
-- [`FastVec<T>`] = `AutoVec<T, 16>` — general-purpose balance
+- `MiniVec<T>` = `AutoVec<T, 8>` — for tiny collections
+- `FastVec<T>` = `AutoVec<T, 16>` — general-purpose balance
 
 ## `no_std` support
 
@@ -77,5 +77,5 @@ This crate requires only `core` and `alloc`, making it suitable for embedded and
 ### `serde`
 
 When this optional dependency is enabled,
-[`StackVec`] and [`AutoVec`] implements the [`serde::Serialize`] and [`serde::Deserialize`] traits.
+`StackVec` and `AutoVec` implements the `serde::Serialize` and `serde::Deserialize` traits.
 

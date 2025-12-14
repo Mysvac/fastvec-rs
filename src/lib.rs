@@ -37,6 +37,7 @@
 //!
 //! - **Flexible capacity**: stack initially, heap when needed
 //! - **Enum-based**: internally either `StackVec` or `Vec`
+//! - **Vec-like** interface
 //! - **Never panics** from capacity limits
 //! - Use when: Size is unknown but usually small.
 //!

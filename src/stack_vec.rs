@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::{
-    fmt::Debug,
+    fmt,
     iter::FusedIterator,
     mem::{ManuallyDrop, MaybeUninit},
     ptr,
@@ -35,7 +35,7 @@ use core::{
 /// assert_eq!(vec, ["Hello", ", world!"]);
 ///
 /// // Converted into Vec to transfer data across scopes.
-/// let vec: Vec<String> = vec.into_vec_exact();
+/// let vec: Vec<String> = vec.into_vec();
 /// // Good, there is only one heap allocation throughout the process.
 /// ```
 pub struct StackVec<T, const N: usize> {
@@ -122,14 +122,14 @@ impl<T, const N: usize> StackVec<T, N> {
     /// # use fastvec::{StackVec, stackvec};
     /// let vec: StackVec<i32, 5> = stackvec![1, 2, 3, 4];
     ///
-    /// let mut vec: StackVec<i32, 10> = vec.truncate_cast();
+    /// let mut vec: StackVec<i32, 10> = vec.force_cast();
     ///
     /// vec.push(5);
     /// vec.push(6);
     /// assert_eq!(vec, [1, 2, 3, 4, 5, 6]);
     /// ```
     #[inline]
-    pub fn truncate_cast<const P: usize>(mut self) -> StackVec<T, P> {
+    pub fn force_cast<const P: usize>(mut self) -> StackVec<T, P> {
         self.truncate(P);
         let mut vec = <StackVec<T, P>>::new();
         unsafe {
@@ -137,49 +137,6 @@ impl<T, const N: usize> StackVec<T, N> {
             vec.len = self.len;
             self.len = 0;
         }
-        vec
-    }
-
-    /// Creates a StackVec from an array.
-    ///
-    /// Copies elements from the provided array into the StackVec.
-    ///
-    /// # Panics
-    /// Panics if array length > N.
-    ///
-    /// # Examples
-    /// ```
-    /// # use fastvec::StackVec;
-    /// let vec: StackVec<i32, 5> = StackVec::from_buf([1, 2, 3]);
-    /// assert_eq!(vec.len(), 3);
-    /// ```
-    #[inline]
-    pub const fn from_buf<const P: usize>(arr: [T; P]) -> Self {
-        assert!(P <= N, "array length should be <= N");
-
-        let mut vec = Self::new();
-        unsafe {
-            ptr::copy_nonoverlapping(arr.as_ptr(), vec.as_mut_ptr(), P);
-            vec.len = P;
-        }
-        core::mem::forget(arr);
-
-        vec
-    }
-
-    /// Creates a StackVec from an array without checking bounds.
-    ///
-    /// # Safety
-    /// - `P` (array length) must be less than or equal to `N` (capacity).
-    #[inline(always)]
-    pub const unsafe fn from_buf_uncheck<const P: usize>(arr: [T; P]) -> Self {
-        let mut vec = Self::new();
-        unsafe {
-            ptr::copy_nonoverlapping(arr.as_ptr(), vec.as_mut_ptr(), P);
-            vec.len = P;
-        }
-        core::mem::forget(arr);
-
         vec
     }
 
@@ -291,6 +248,49 @@ impl<T, const N: usize> StackVec<T, N> {
         N
     }
 
+    /// Creates a StackVec from an array.
+    ///
+    /// Copies elements from the provided array into the StackVec.
+    ///
+    /// # Panics
+    /// Panics if array length > N.
+    ///
+    /// # Examples
+    /// ```
+    /// # use fastvec::StackVec;
+    /// let vec: StackVec<i32, 5> = StackVec::from_buf([1, 2, 3]);
+    /// assert_eq!(vec.len(), 3);
+    /// ```
+    #[inline]
+    pub const fn from_buf<const P: usize>(arr: [T; P]) -> Self {
+        assert!(P <= N, "array length should be <= N");
+
+        let mut vec = Self::new();
+        unsafe {
+            ptr::copy_nonoverlapping(arr.as_ptr(), vec.as_mut_ptr(), P);
+            vec.len = P;
+        }
+        core::mem::forget(arr);
+
+        vec
+    }
+
+    /// Creates a StackVec from an array without checking bounds.
+    ///
+    /// # Safety
+    /// - `P` (array length) must be less than or equal to `N` (capacity).
+    #[inline(always)]
+    pub const unsafe fn from_buf_uncheck<const P: usize>(arr: [T; P]) -> Self {
+        let mut vec = Self::new();
+        unsafe {
+            ptr::copy_nonoverlapping(arr.as_ptr(), vec.as_mut_ptr(), P);
+            vec.len = P;
+        }
+        core::mem::forget(arr);
+
+        vec
+    }
+
     /// Convert [`Vec`] to [`StackVec`] .
     ///
     /// When the capacity is insufficient, Only retain the first N items.
@@ -355,12 +355,12 @@ impl<T, const N: usize> StackVec<T, N> {
     /// let mut vec = StackVec::<String, 5>::new();
     /// vec.push("123".to_string());
     ///
-    /// let vec = vec.into_vec_exact();
+    /// let vec = vec.into_vec();
     /// assert_eq!(vec.len(), 1);
     /// assert_eq!(vec.capacity(), 1);
     /// ```
     #[inline]
-    pub fn into_vec_exact(&mut self) -> Vec<T> {
+    pub fn into_vec(&mut self) -> Vec<T> {
         let mut vec: Vec<T> = Vec::with_capacity(self.len);
 
         unsafe {
@@ -375,7 +375,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// Convert a [`StackVec`] to a [`Box<T>`](Box)
     #[inline]
     pub fn into_boxed_slice(&mut self) -> Box<[T]> {
-        self.into_vec_exact().into_boxed_slice()
+        self.into_vec().into_boxed_slice()
     }
 
     /// Convert [`StackVec`] to [`Vec`] with specified capacity.
@@ -400,7 +400,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// # Safety
     /// len <= capacity
     #[inline(always)]
-    pub unsafe fn into_vec_uncheck(&mut self, capacity: usize) -> Vec<T> {
+    pub unsafe fn into_vec_with_capacity_uncheck(&mut self, capacity: usize) -> Vec<T> {
         let mut vec: Vec<T> = Vec::with_capacity(capacity);
 
         unsafe {
@@ -431,9 +431,13 @@ impl<T, const N: usize> StackVec<T, N> {
     /// ```
     #[inline]
     pub const fn push(&mut self, value: T) {
-        let value = MaybeUninit::new(value);
-        self.data[self.len] = value;
-        self.len += 1;
+        let len = self.len;
+        assert!(len < N, "Insufficient capacity.");
+
+        unsafe {
+            ptr::write(self.as_mut_ptr().add(len), value);
+            self.len = len + 1;
+        }
     }
 
     /// Appends an element to the back of the vector without bounds checking.
@@ -532,6 +536,24 @@ impl<T, const N: usize> StackVec<T, N> {
             "insertion index should be <= len and < N"
         );
 
+        unsafe {
+            let ptr = self.as_mut_ptr().add(index);
+            if index < self.len {
+                ptr::copy(ptr, ptr.add(1), self.len - index);
+            }
+            ptr::write(ptr, element);
+            self.len += 1;
+        }
+    }
+
+    /// Inserts an element at position `index` within the vector, without bounds checking.
+    ///
+    /// # Safety
+    /// - len < capacity (before insert)
+    /// - index <= len
+    #[inline(always)]
+    pub unsafe fn insert_uncheck(&mut self, index: usize, element: T) {
+        // assert!(index <= N, "insertion index should be <= len");
         unsafe {
             let ptr = self.as_mut_ptr().add(index);
             if index < self.len {
@@ -882,55 +904,6 @@ impl<T, const N: usize> StackVec<T, N> {
         }
     }
 
-    /// Removes the subslice indicated by the given range from the vector,
-    /// returning a double-ended iterator over the removed subslice.
-    ///
-    /// If the iterator is dropped before being fully consumed, it drops the remaining removed elements.
-    ///
-    /// The returned iterator keeps a mutable borrow on the vector to optimize its implementation.
-    ///
-    /// # Panics
-    /// Panics if the range has `start_bound > end_bound`, or
-    /// if the range is bounded on either end and past the length of the vector.
-    ///
-    /// See more information in [`Vec::drain`].
-    ///
-    /// # Examples
-    /// ```
-    /// # use fastvec::{StackVec, stackvec};
-    /// let mut v: StackVec<_, 5> = stackvec![1, 2, 3];
-    /// let u: Vec<_> = v.drain(1..).collect();
-    /// assert_eq!(v.as_slice(), [1]);
-    /// assert_eq!(u, [2, 3]);
-    ///
-    /// // A full range clears the vector, like `clear()` doess
-    /// v.drain(..);
-    /// assert_eq!(v, []);
-    /// ```
-    pub fn drain<R>(&mut self, range: R) -> Drain<'_, T, N>
-    where
-        R: core::ops::RangeBounds<usize>,
-    {
-        let len = self.len;
-
-        let (start, end) = crate::utils::split_range_bound(&range, len);
-        assert!(start <= end, "drain start greater than end");
-        assert!(end <= len, "drain end out of bounds");
-
-        unsafe {
-            self.len = start;
-
-            let range_slice = core::slice::from_raw_parts(self.as_ptr().add(start), end - start);
-
-            Drain {
-                tail_start: end,
-                tail_len: len - end,
-                iter: range_slice.iter(),
-                vec: core::ptr::NonNull::new_unchecked(self as *mut _),
-            }
-        }
-    }
-
     /// Clears the vector, removing all values.
     ///
     /// # Examples
@@ -1055,105 +1028,6 @@ impl<T, const N: usize> StackVec<T, N> {
     #[inline]
     pub const fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
         &mut self.data
-    }
-}
-
-/// An iterator that removes the items from a [`StackVec`] and yields them by value.
-pub struct Drain<'a, T: 'a, const N: usize> {
-    tail_start: usize,
-    tail_len: usize,
-    iter: core::slice::Iter<'a, T>,
-    vec: ptr::NonNull<StackVec<T, N>>,
-}
-
-impl<'a, T: 'a, const N: usize> Iterator for Drain<'a, T, N> {
-    type Item = T;
-
-    #[inline]
-    fn next(&mut self) -> Option<T> {
-        self.iter
-            .next()
-            .map(|reference| unsafe { core::ptr::read(reference) })
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iter.size_hint()
-    }
-}
-
-impl<'a, T: 'a, const N: usize> DoubleEndedIterator for Drain<'a, T, N> {
-    #[inline]
-    fn next_back(&mut self) -> Option<T> {
-        self.iter
-            .next_back()
-            .map(|reference| unsafe { core::ptr::read(reference) })
-    }
-}
-
-impl<T, const N: usize> ExactSizeIterator for Drain<'_, T, N> {
-    #[inline]
-    fn len(&self) -> usize {
-        self.iter.len()
-    }
-}
-
-impl<T, const N: usize> core::iter::FusedIterator for Drain<'_, T, N> {}
-
-impl<'a, T: 'a, const N: usize> Drop for Drain<'a, T, N> {
-    fn drop(&mut self) {
-        /// Moves back the un-`Drain`ed elements to restore the original `Vec`.
-        struct DropGuard<'r, 'a, T, const N: usize>(&'r mut Drain<'a, T, N>);
-
-        impl<'r, 'a, T, const N: usize> Drop for DropGuard<'r, 'a, T, N> {
-            fn drop(&mut self) {
-                if self.0.tail_len > 0 {
-                    unsafe {
-                        let source_vec = self.0.vec.as_mut();
-                        // memmove back untouched tail, update to new length
-                        let start = source_vec.len();
-                        let tail = self.0.tail_start;
-                        if tail != start {
-                            let ptr = source_vec.as_mut_ptr();
-                            let src = ptr.add(tail);
-                            let dst = ptr.add(start);
-                            core::ptr::copy(src, dst, self.0.tail_len);
-                        }
-                        source_vec.set_len(start + self.0.tail_len);
-                    }
-                }
-            }
-        }
-
-        let mut vec = self.vec;
-        let iter = core::mem::take(&mut self.iter);
-        let drop_len = iter.len();
-
-        if core::mem::size_of::<T>() == 0 {
-            // ZSTs have no identity, so we don't need to move them around, we only need to drop the correct amount.
-            // this can be achieved by manipulating the Vec length instead of moving values out from `iter`.
-            unsafe {
-                let vec = vec.as_mut();
-                let old_len = vec.len();
-                vec.set_len(old_len + drop_len + self.tail_len);
-                vec.truncate(old_len + self.tail_len);
-            }
-
-            return;
-        }
-
-        // ensure elements are moved back into their appropriate places, even when drop_in_place panics
-        let _guard = DropGuard(self);
-
-        if drop_len == 0 {
-            return;
-        }
-
-        unsafe {
-            let to_drop: *mut [T] =
-                core::ptr::slice_from_raw_parts_mut(iter.as_slice().as_ptr() as *mut T, drop_len);
-            core::ptr::drop_in_place(to_drop);
-        }
     }
 }
 
@@ -1384,10 +1258,11 @@ impl<'a, T: 'a + Clone, const N: usize> Extend<&'a T> for StackVec<T, N> {
 }
 
 impl<T, const N: usize> Extend<T> for StackVec<T, N> {
-    /// Move values from iterators.
+    /// Extends a collection with the contents of an iterator.
     ///
     /// # Panics
     /// Insufficient capacity.
+    #[inline]
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for item in iter {
             self.push(item);
@@ -1415,7 +1290,7 @@ impl<'a, T: Clone, const N: usize> From<&'a StackVec<T, N>> for alloc::borrow::C
 
 impl<'a, T: Clone, const N: usize> From<StackVec<T, N>> for alloc::borrow::Cow<'a, [T]> {
     fn from(mut v: StackVec<T, N>) -> alloc::borrow::Cow<'a, [T]> {
-        alloc::borrow::Cow::Owned(v.into_vec_exact())
+        alloc::borrow::Cow::Owned(v.into_vec())
     }
 }
 
@@ -1497,6 +1372,30 @@ impl<T, const N: usize> FromIterator<T> for StackVec<T, N> {
     }
 }
 
+/// An iterator that consumes a [`StackVec`] and yields its items by value.
+///
+/// # Examples
+///
+/// ```
+/// # use fastvec::{StackVec, stackvec};
+///
+/// let vec: StackVec<&'static str, 3> = stackvec!["1", "2", "3"];
+/// let mut iter = vec.into_iter();
+///
+/// assert_eq!(iter.next(), Some("1"));
+///
+/// let vec: Vec<&'static str> = iter.collect();
+/// assert_eq!(vec, ["2", "3"]);
+/// ```
+#[derive(Clone)]
+pub struct IntoIter<T, const N: usize> {
+    vec: ManuallyDrop<StackVec<T, N>>,
+    index: usize,
+}
+
+unsafe impl<T, const N: usize> Send for IntoIter<T, N> where T: Send {}
+unsafe impl<T, const N: usize> Sync for IntoIter<T, N> where T: Sync {}
+
 impl<T, const N: usize> IntoIterator for StackVec<T, N> {
     type Item = T;
     type IntoIter = IntoIter<T, N>;
@@ -1509,16 +1408,6 @@ impl<T, const N: usize> IntoIterator for StackVec<T, N> {
         }
     }
 }
-
-/// An iterator that consumes a [`StackVec`] and yields its items by value.
-#[derive(Clone)]
-pub struct IntoIter<T, const N: usize> {
-    vec: ManuallyDrop<StackVec<T, N>>,
-    index: usize,
-}
-
-unsafe impl<T, const N: usize> Send for IntoIter<T, N> where T: Send {}
-unsafe impl<T, const N: usize> Sync for IntoIter<T, N> where T: Sync {}
 
 impl<T, const N: usize> Iterator for IntoIter<T, N> {
     type Item = T;
@@ -1586,7 +1475,6 @@ impl<T, const N: usize> IntoIter<T, N> {
 }
 
 impl<T, const N: usize> Default for IntoIter<T, N> {
-    #[inline]
     fn default() -> Self {
         Self {
             vec: ManuallyDrop::new(StackVec::new()),
@@ -1595,8 +1483,485 @@ impl<T, const N: usize> Default for IntoIter<T, N> {
     }
 }
 
-impl<T: Debug, const N: usize> Debug for IntoIter<T, N> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        Debug::fmt(self.as_slice(), f)
+impl<T: fmt::Debug, const N: usize> fmt::Debug for IntoIter<T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("IntoIter").field(&self.as_slice()).finish()
+    }
+}
+
+/// An iterator that removes the items from a [`StackVec`] and yields them by value.
+///
+/// See [`StackVec::drain`] .
+pub struct Drain<'a, T: 'a, const N: usize> {
+    tail_start: usize,
+    tail_len: usize,
+    iter: core::slice::Iter<'a, T>,
+    vec: ptr::NonNull<StackVec<T, N>>,
+}
+
+impl<T, const N: usize> StackVec<T, N> {
+    /// Removes the subslice indicated by the given range from the vector,
+    /// returning a double-ended iterator over the removed subslice.
+    ///
+    /// If the iterator is dropped before being fully consumed, it drops the remaining removed elements.
+    ///
+    /// The returned iterator keeps a mutable borrow on the vector to optimize its implementation.
+    ///
+    /// # Panics
+    /// Panics if the range has `start_bound > end_bound`, or
+    /// if the range is bounded on either end and past the length of the vector.
+    ///
+    /// See more information in [`Vec::drain`].
+    ///
+    /// # Examples
+    /// ```
+    /// # use fastvec::{StackVec, stackvec};
+    /// let mut v: StackVec<_, 5> = stackvec![1, 2, 3];
+    /// let u: Vec<_> = v.drain(1..).collect();
+    /// assert_eq!(v.as_slice(), [1]);
+    /// assert_eq!(u, [2, 3]);
+    ///
+    /// // A full range clears the vector, like `clear()` doess
+    /// v.drain(..);
+    /// assert_eq!(v, []);
+    /// ```
+    pub fn drain<R: core::ops::RangeBounds<usize>>(&mut self, range: R) -> Drain<'_, T, N> {
+        let len = self.len;
+
+        let (start, end) = crate::utils::split_range_bound(&range, len);
+        assert!(start <= end, "drain start greater than end");
+        assert!(end <= len, "drain end out of bounds");
+
+        unsafe {
+            self.len = start;
+
+            let range_slice = core::slice::from_raw_parts(self.as_ptr().add(start), end - start);
+
+            Drain {
+                tail_start: end,
+                tail_len: len - end,
+                iter: range_slice.iter(),
+                vec: core::ptr::NonNull::new_unchecked(self as *mut _),
+            }
+        }
+    }
+}
+
+impl<T, const N: usize> Drain<'_, T, N> {
+    pub fn as_slice(&self) -> &[T] {
+        self.iter.as_slice()
+    }
+}
+
+impl<T, const N: usize> AsRef<[T]> for Drain<'_, T, N> {
+    fn as_ref(&self) -> &[T] {
+        self.iter.as_slice()
+    }
+}
+
+impl<T: fmt::Debug, const N: usize> fmt::Debug for Drain<'_, T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Drain").field(&self.iter.as_slice()).finish()
+    }
+}
+
+impl<T, const N: usize> Iterator for Drain<'_, T, N> {
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<T> {
+        self.iter
+            .next()
+            .map(|reference| unsafe { ptr::read(reference) })
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl<T, const N: usize> DoubleEndedIterator for Drain<'_, T, N> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.iter
+            .next_back()
+            .map(|reference| unsafe { ptr::read(reference) })
+    }
+}
+
+impl<T, const N: usize> ExactSizeIterator for Drain<'_, T, N> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
+}
+
+impl<T, const N: usize> core::iter::FusedIterator for Drain<'_, T, N> {}
+
+impl<'a, T: 'a, const N: usize> Drop for Drain<'a, T, N> {
+    fn drop(&mut self) {
+        /// Moves back the un-`Drain`ed elements to restore the original `Vec`.
+        struct DropGuard<'r, 'a, T, const N: usize>(&'r mut Drain<'a, T, N>);
+
+        impl<'r, 'a, T, const N: usize> Drop for DropGuard<'r, 'a, T, N> {
+            fn drop(&mut self) {
+                if self.0.tail_len > 0 {
+                    unsafe {
+                        let source_vec = self.0.vec.as_mut();
+                        // memmove back untouched tail, update to new length
+                        let start = source_vec.len;
+                        let tail = self.0.tail_start;
+                        if tail != start {
+                            let src = source_vec.as_ptr().add(tail);
+                            let dst = source_vec.as_mut_ptr().add(start);
+                            ptr::copy(src, dst, self.0.tail_len);
+                        }
+                        source_vec.len = start + self.0.tail_len;
+                    }
+                }
+            }
+        }
+
+        let iter = core::mem::take(&mut self.iter);
+        let drop_len = iter.len();
+
+        let mut vec = self.vec;
+
+        if core::mem::size_of::<T>() == 0 {
+            // ZSTs have no identity, so we don't need to move them around, we only need to drop the correct amount.
+            // this can be achieved by manipulating the Vec length instead of moving values out from `iter`.
+            unsafe {
+                let vec = vec.as_mut();
+                let old_len = vec.len();
+                vec.len = old_len + drop_len + self.tail_len;
+                vec.truncate(old_len + self.tail_len);
+            }
+
+            return;
+        }
+
+        // ensure elements are moved back into their appropriate places, even when drop_in_place panics
+        let _guard = DropGuard(self);
+
+        if drop_len == 0 {
+            return;
+        }
+
+        // as_slice() must only be called when iter.len() is > 0 because
+        // it also gets touched by vec::Splice which may turn it into a dangling pointer
+        // which would make it and the vec pointer point to different allocations which would
+        // lead to invalid pointer arithmetic below.
+        let drop_ptr = iter.as_slice().as_ptr();
+
+        unsafe {
+            // drop_ptr comes from a slice::Iter which only gives us a &[T] but for drop_in_place
+            // a pointer with mutable provenance is necessary. Therefore we must reconstruct
+            // it from the original vec but also avoid creating a &mut to the front since that could
+            // invalidate raw pointers to it which some unsafe code might rely on.
+            let vec_ptr = vec.as_mut().as_mut_ptr();
+            let drop_offset = drop_ptr.offset_from_unsigned(vec_ptr);
+            let to_drop = ptr::slice_from_raw_parts_mut(vec_ptr.add(drop_offset), drop_len);
+            ptr::drop_in_place(to_drop);
+        }
+    }
+}
+
+/// A splicing iterator for [`StackVec`].
+///
+/// See [`StackVec::splice`] .
+#[derive(Debug)]
+pub struct Splice<'a, I: ExactSizeIterator + 'a, const N: usize> {
+    pub(super) drain: Drain<'a, I::Item, N>,
+    pub(super) replace_with: I,
+}
+
+impl<T, const N: usize> StackVec<T, N> {
+    /// Creates a splicing iterator that replaces the specified range in the vector
+    /// with the given `replace_with` iterator and yields the removed items.
+    /// `replace_with` does not need to be the same length as `range`.
+    ///
+    /// See more infomation in [`alloc::vec::Splice`], the only difference is that
+    /// we require the `replace_with` is [`ExactSizeIterator`]`.
+    ///
+    /// This is optimal if:
+    ///
+    /// * The tail (elements in the vector after `range`) is empty,
+    /// * or `replace_with` yields fewer or equal elements than `range`'s length
+    ///
+    /// # Panics
+    ///
+    /// - if the range has `start_bound > end_bound`.
+    /// - if the range is bounded on either end and past the length of the vector.
+    /// - result length > capacity `N`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{stackvec, StackVec};
+    /// let mut v: StackVec<_, 5> = stackvec![1, 2, 3, 4];
+    /// let new = [7, 8, 9];
+    /// let u: Vec<_> = v.splice(1..3, new).collect();
+    /// assert_eq!(v, [1, 7, 8, 9, 4]);
+    /// assert_eq!(u, [2, 3]);
+    /// ```
+    ///
+    /// Using `splice` to insert new items into a vector efficiently at a specific position
+    /// indicated by an empty range:
+    ///
+    /// ```
+    /// # use fastvec::{stackvec, StackVec};
+    /// let mut v: StackVec<_, 5> = stackvec![1, 5];
+    /// let new = [2, 3, 4];
+    /// v.splice(1..1, new);
+    /// assert_eq!(v, [1, 2, 3, 4, 5]);
+    /// ```
+    pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Splice<'_, I::IntoIter, N>
+    where
+        R: core::ops::RangeBounds<usize>,
+        I: IntoIterator<Item = T>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        Splice {
+            drain: self.drain(range),
+            replace_with: replace_with.into_iter(),
+        }
+    }
+}
+
+impl<I: ExactSizeIterator, const N: usize> Iterator for Splice<'_, I, N> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.drain.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.drain.size_hint()
+    }
+}
+
+impl<I: ExactSizeIterator, const N: usize> DoubleEndedIterator for Splice<'_, I, N> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.drain.next_back()
+    }
+}
+
+impl<I: ExactSizeIterator, const N: usize> ExactSizeIterator for Splice<'_, I, N> {
+    fn len(&self) -> usize {
+        self.drain.len()
+    }
+}
+
+impl<'a, I: ExactSizeIterator, const N: usize> Drop for Splice<'a, I, N> {
+    fn drop(&mut self) {
+        self.drain.by_ref().for_each(drop);
+        // At this point draining is done and the only remaining tasks are splicing
+        // and moving things into the final place.
+        // Which means we can replace the slice::Iter with pointers that won't point to deallocated
+        // memory, so that Drain::drop is still allowed to call iter.len(), otherwise it would break
+        // the ptr.offset_from_unsigned contract.
+        self.drain.iter = (&[]).iter();
+
+        unsafe {
+            if self.drain.tail_len == 0 {
+                self.drain.vec.as_mut().extend(self.replace_with.by_ref());
+                return;
+            }
+
+            // There may be more elements. Use the lower bound as an estimate.
+            // FIXME: Is the upper bound a better guess? Or something else?
+            let exact_len = self.replace_with.len();
+            let vec = self.drain.vec.as_mut();
+
+            // Move tail
+            let new_tail_start = vec.len + exact_len;
+            if new_tail_start != self.drain.tail_start {
+                assert!(
+                    new_tail_start + self.drain.tail_len <= N,
+                    "the length should be <= capacity"
+                );
+
+                let src = vec.as_ptr().add(self.drain.tail_start);
+                let dst = vec.as_mut_ptr().add(new_tail_start);
+                ptr::copy(src, dst, self.drain.tail_len);
+
+                self.drain.tail_start = new_tail_start;
+            }
+
+            let range_slice =
+                core::slice::from_raw_parts_mut(vec.as_mut_ptr().add(vec.len), exact_len);
+
+            for place in range_slice {
+                let new_item = self
+                    .replace_with
+                    .next()
+                    .expect("ExactSizeIterator::len must be right.");
+                ptr::write(place, new_item);
+            }
+            vec.len += exact_len;
+        }
+    }
+}
+
+/// An iterator which uses a closure to determine if an element should be removed.
+///
+/// See [`StackVec::extract_if`] .
+pub struct ExtractIf<'a, T, F: FnMut(&mut T) -> bool, const N: usize> {
+    vec: &'a mut StackVec<T, N>,
+    idx: usize,
+    end: usize,
+    del: usize,
+    old_len: usize,
+    pred: F,
+}
+
+impl<T, const N: usize> StackVec<T, N> {
+    /// Creates an iterator which uses a closure to determine if an element in the range should be removed.
+    ///
+    /// See more infomation in [`Vec::extract_if`] .
+    ///
+    /// # Panics
+    ///
+    /// If `range` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// Splitting a vector into even and odd values, reusing the original vector:
+    ///
+    /// ```
+    /// # use fastvec::{stackvec, StackVec};
+    /// let mut numbers: StackVec<_, 20> = stackvec![1, 2, 3, 4, 5, 6, 8, 9, 11, 13, 14, 15];
+    ///
+    /// let evens = numbers.extract_if(.., |x| *x % 2 == 0).collect::<StackVec<_, 10>>();
+    /// let odds = numbers;
+    ///
+    /// assert_eq!(evens, [2, 4, 6, 8, 14]);
+    /// assert_eq!(odds, [1, 3, 5, 9, 11, 13, 15]);
+    /// ```
+    ///
+    /// Using the range argument to only process a part of the vector:
+    ///
+    /// ```
+    /// # use fastvec::{stackvec, StackVec};
+    /// let mut items: StackVec<_, 15> = stackvec![0, 0, 0, 0, 0, 0, 0, 1, 2, 1, 2, 1, 2];
+    /// let ones = items.extract_if(7.., |x| *x == 1).collect::<Vec<_>>();
+    /// assert_eq!(items, [0, 0, 0, 0, 0, 0, 0, 2, 2, 2]);
+    /// assert_eq!(ones.len(), 3);
+    /// ```
+    pub fn extract_if<F, R>(&mut self, range: R, filter: F) -> ExtractIf<'_, T, F, N>
+    where
+        F: FnMut(&mut T) -> bool,
+        R: core::ops::RangeBounds<usize>,
+    {
+        let old_len = self.len;
+        let (start, end) = crate::utils::split_range_bound(&range, old_len);
+
+        // Guard against the vec getting leaked (leak amplification)
+        self.len = 0;
+
+        ExtractIf {
+            vec: self,
+            idx: start,
+            del: 0,
+            end,
+            old_len,
+            pred: filter,
+        }
+    }
+}
+
+impl<T, F: FnMut(&mut T) -> bool, const N: usize> Iterator for ExtractIf<'_, T, F, N> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        while self.idx < self.end {
+            let i = self.idx;
+            // SAFETY:
+            //  We know that `i < self.end` from the if guard and that `self.end <= self.old_len` from
+            //  the validity of `Self`. Therefore `i` points to an element within `vec`.
+            //
+            //  Additionally, the i-th element is valid because each element is visited at most once
+            //  and it is the first time we access vec[i].
+            //
+            //  Note: we can't use `vec.get_unchecked_mut(i)` here since the precondition for that
+            //  function is that i < vec.len(), but we've set vec's length to zero.
+            let cur = unsafe { &mut *self.vec.as_mut_ptr().add(i) };
+            let drained = (self.pred)(cur);
+            // Update the index *after* the predicate is called. If the index
+            // is updated prior and the predicate panics, the element at this
+            // index would be leaked.
+            self.idx += 1;
+            if drained {
+                self.del += 1;
+                // SAFETY: We never touch this element again after returning it.
+                return Some(unsafe { ptr::read(cur) });
+            } else if self.del > 0 {
+                // SAFETY: `self.del` > 0, so the hole slot must not overlap with current element.
+                // We use copy for move, and never touch this element again.
+                unsafe {
+                    let hole_slot = self.vec.as_mut_ptr().add(i - self.del);
+                    ptr::copy_nonoverlapping(cur, hole_slot, 1);
+                }
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.end - self.idx))
+    }
+}
+
+impl<T, F: FnMut(&mut T) -> bool, const N: usize> Drop for ExtractIf<'_, T, F, N> {
+    fn drop(&mut self) {
+        if self.del > 0 {
+            // SAFETY: Trailing unchecked items must be valid since we never touch them.
+            unsafe {
+                ptr::copy(
+                    self.vec.as_ptr().add(self.idx),
+                    self.vec.as_mut_ptr().add(self.idx - self.del),
+                    self.old_len - self.idx,
+                );
+            }
+        }
+        // SAFETY: After filling holes, all items are in contiguous memory.
+        self.vec.len = self.old_len - self.del;
+    }
+}
+
+impl<T: fmt::Debug, F: FnMut(&mut T) -> bool, const N: usize> fmt::Debug
+    for ExtractIf<'_, T, F, N>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let peek = if self.idx < self.end {
+            self.vec.get(self.idx)
+        } else {
+            None
+        };
+        f.debug_struct("ExtractIf")
+            .field("peek", &peek)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_support() {
+        let vec: StackVec<(), 0> = stackvec![];
+        assert_eq!(vec.len(), 0);
+        assert_eq!(vec.capacity(), 0);
+        assert_eq!(vec, []);
+    }
+
+    #[test]
+    fn zst_support() {
+        assert_eq!(
+            size_of::<StackVec<(), 100000>>(),
+            size_of::<StackVec<(), 0>>(),
+        );
     }
 }
