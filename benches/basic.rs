@@ -103,7 +103,7 @@ fn bench_vec(c: &mut Criterion) {
 }
 
 fn new<T, V: VecLike<T>>(b: &mut criterion::Bencher) {
-    b.iter(|| hint::black_box({ V::new_with_small_capacity() }));
+    b.iter(|| hint::black_box(V::new_with_small_capacity()));
 }
 
 fn push_mini<T: Default, V: VecLike<T>>(b: &mut criterion::Bencher) {
