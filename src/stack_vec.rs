@@ -8,35 +8,32 @@ use core::{
 
 /// A vector stored on the stack.
 ///
-/// Storing on the stack with a fixed capacity, overflow can cause panic.
+/// Stored on the stack with a fixed capacity; pushing beyond capacity panics.
 ///
-/// This type is useful when you are unsure of the length of the data but know that the amount of data is small.
-/// At this point, using this container can avoid the overhead of heap requests.
-///
-/// Most methods are similar to [alloc::vec::Vec] .
+/// This type is useful when the data is usually small and you want to avoid
+/// heap allocations. It mirrors most of the API of [`Vec`].
 ///
 /// # Examples
 ///
 /// ```
 /// use fastvec::StackVec;
 ///
-/// // Allocate uninit memory for 10 elements on the stack,
-/// // It can be completed during compilation.
+/// // Allocate uninitialized space for 10 elements on the stack
 /// let mut vec: StackVec<String, 10> = StackVec::new();
 ///
 /// assert_eq!(vec.len(), 0);
 /// assert_eq!(vec.capacity(), 10);
 ///
-/// // Then you can use it like alloc::vec::Vec,
-/// // the only difference being that the capacity is not variable.
+/// // Then you can use it like `Vec`, the only difference is that
+/// // the capacity is fixed.
 /// vec.push("Hello".to_string());
 /// vec.push(", world!".to_string());
 ///
 /// assert_eq!(vec, ["Hello", ", world!"]);
 ///
-/// // Converted into Vec to transfer data across scopes.
+/// // Convert into `Vec` to transfer ownership across scopes.
 /// let vec: Vec<String> = vec.into_vec();
-/// // Good, there is only one heap allocation throughout the process.
+/// // There is only one heap allocation in the entire process.
 /// ```
 pub struct StackVec<T, const N: usize> {
     data: [MaybeUninit<T>; N],
@@ -58,16 +55,16 @@ impl<T, const N: usize> Drop for StackVec<T, N> {
     }
 }
 
-/// Creates a `StackVec` containing the arguments.
+/// Creates a [`StackVec`] containing the arguments.
 ///
-/// The syntax is similar to [`vec!`](https://doc.rust-lang.org/std/macro.vec.html) .
+/// The syntax is similar to [`vec!`](https://doc.rust-lang.org/std/macro.vec.html).
 ///
 /// You must explicitly specify the container capacity.
 /// The number of elements cannot exceed the capacity.
 ///
-/// When called with no arguments, it can be computed at compile time.
-/// When all elements are explicitly listed and each element can be evaluated at compile time,
-/// the compiler can also complete the computation (e.g., `[1, 2, 3, 4]`).
+/// When called with no arguments, its size is known at compile time.
+/// When all elements are explicitly listed and each element can be evaluated at compile time
+/// (e.g., `[1, 2, 3, 4]`), the compiler can also construct it at compile time.
 /// However, if the `[item; len]` syntax is used, it relies on `Clone`,
 /// which may need to be deferred to runtime (even for simple cases like `[0; 5]`).
 ///
@@ -140,7 +137,8 @@ impl<T, const N: usize> StackVec<T, N> {
         vec
     }
 
-    /// Returns a raw pointer to the vector’s buffer, or a dangling raw pointer valid for zero sized reads if the T is zero sized type.
+    /// Returns a raw pointer to the vector’s buffer, or a dangling pointer
+    /// valid for zero-sized reads if `T` is a zero-sized type.
     ///
     /// The caller must ensure that the vector outlives the pointer this function returns, or else it will end up dangling.
     ///
@@ -150,7 +148,8 @@ impl<T, const N: usize> StackVec<T, N> {
         &raw const self.data as *const T
     }
 
-    /// Returns a raw mutable pointer to the vector’s buffer, or a dangling raw pointer valid for zero sized reads if the T is zero sized type.
+    /// Returns a raw mutable pointer to the vector’s buffer, or a dangling pointer
+    /// valid for zero-sized reads if `T` is a zero-sized type.
     ///
     /// The caller must ensure that the vector outlives the pointer this function returns, or else it will end up dangling.
     ///
@@ -169,7 +168,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// - If the length is increased, it is necessary to ensure that the new element is initialized correctly.
     /// - If the length is reduced, it is necessary to ensure that the reduced elements can be dropped normally.
     ///
-    /// See more infomation in [`Vec::set_len`] .
+    /// See more information in [`Vec::set_len`].
     #[inline(always)]
     pub const unsafe fn set_len(&mut self, new_len: usize) {
         debug_assert!(new_len <= N);
@@ -187,7 +186,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// Since the container is stored on the stack, it copies the target value in bytes,
     /// and you need to ensure that the target is not dropped again.
     ///
-    /// See more infomation in [Vec::from_raw_parts] .
+    /// See more information in [`Vec::from_raw_parts`].
     ///
     /// # Examples
     ///
@@ -220,7 +219,7 @@ impl<T, const N: usize> StackVec<T, N> {
         vec
     }
 
-    /// Return the number of internal elements.
+    /// Returns the number of elements in the vector.
     ///
     /// # Examples
     /// ```
@@ -235,7 +234,7 @@ impl<T, const N: usize> StackVec<T, N> {
 
     /// Returns the total number of elements the vector can hold without reallocating.
     ///
-    /// This is always equal to `N` .
+    /// This is always equal to `N`.
     ///
     /// # Examples
     /// ```
@@ -291,7 +290,7 @@ impl<T, const N: usize> StackVec<T, N> {
         vec
     }
 
-    /// Convert [`Vec`] to [`StackVec`] .
+    /// Converts a [`Vec`] into a [`StackVec`].
     ///
     /// When the capacity is insufficient, Only retain the first N items.
     ///
@@ -322,7 +321,7 @@ impl<T, const N: usize> StackVec<T, N> {
         res
     }
 
-    /// Converts a Vec to a StackVec without checking the length.
+    /// Converts a [`Vec`] to a [`StackVec`] without checking the length.
     ///
     /// This function copies data from the Vec into the StackVec,
     /// then clears the Vec.
@@ -342,11 +341,9 @@ impl<T, const N: usize> StackVec<T, N> {
         res
     }
 
-    /// Convert a [`StackVec`] to a [`Vec`]
+    /// Converts a [`StackVec`] to a [`Vec`].
     ///
-    /// Allocate the **exact** memory and transfer the data to the heap.
-    ///
-    /// Although it is an exact capacity, this function has no additional overhead.
+    /// Allocates exactly `len` elements and transfers the data to the heap.
     ///
     /// # Examples
     ///
@@ -372,13 +369,13 @@ impl<T, const N: usize> StackVec<T, N> {
         vec
     }
 
-    /// Convert a [`StackVec`] to a [`Box<T>`](Box)
+    /// Converts a [`StackVec`] into a [`Box<[T]>`].
     #[inline]
     pub fn into_boxed_slice(&mut self) -> Box<[T]> {
         self.into_vec().into_boxed_slice()
     }
 
-    /// Convert [`StackVec`] to [`Vec`] with specified capacity.
+    /// Converts a [`StackVec`] to a [`Vec`] with the specified capacity.
     ///
     /// If the specified capacity is less than the length,
     /// the length will be used instead of the specified value.
@@ -395,10 +392,10 @@ impl<T, const N: usize> StackVec<T, N> {
         vec
     }
 
-    /// Convert [`StackVec`] to [`Vec`] with specified capacity.
+    /// Converts a [`StackVec`] to a [`Vec`] with the specified capacity.
     ///
     /// # Safety
-    /// len <= capacity
+    /// The caller must ensure `len <= capacity`.
     #[inline(always)]
     pub unsafe fn into_vec_with_capacity_uncheck(&mut self, capacity: usize) -> Vec<T> {
         let mut vec: Vec<T> = Vec::with_capacity(capacity);
@@ -452,7 +449,7 @@ impl<T, const N: usize> StackVec<T, N> {
         self.len += 1;
     }
 
-    /// Remove an item from the end of the vector and return it, or `None` if empty.
+    /// Removes an item from the end of the vector and returns it, or `None` if empty.
     ///
     /// # Time complexity
     /// O(1)
@@ -658,7 +655,7 @@ impl<T, const N: usize> StackVec<T, N> {
         }
     }
 
-    /// Extracts a slice containing the entire vector.
+    /// Extracts a mutable slice containing the entire vector.
     ///
     /// # Examples
     ///
@@ -698,6 +695,9 @@ impl<T, const N: usize> StackVec<T, N> {
     /// This method operates in place, visiting each element exactly once in the original order,
     /// and preserves the order of the retained elements.
     ///
+    /// # Time complexity
+    /// O(N)
+    ///
     /// # Examples
     ///
     /// ```
@@ -734,6 +734,9 @@ impl<T, const N: usize> StackVec<T, N> {
     /// This method operates in place, visiting each element exactly once in the original order,
     /// and preserves the order of the retained elements.
     ///
+    /// # Time complexity
+    /// O(N)
+    ///
     /// # Examples
     ///
     /// ```
@@ -767,7 +770,11 @@ impl<T, const N: usize> StackVec<T, N> {
 
     /// Removes all but the first of consecutive elements in the vector that resolve to the same key.
     ///
-    /// See [`Vec::dedup_by_key`] .
+    /// See [`Vec::dedup_by_key`].
+    ///
+    /// # Time Complexity
+    ///
+    /// O(N)
     ///
     /// # Examples
     ///
@@ -790,7 +797,11 @@ impl<T, const N: usize> StackVec<T, N> {
 
     /// Removes all but the first of consecutive elements in the vector satisfying a given equality relation.
     ///
-    /// See [`Vec::dedup_by_key`] .
+    /// See [`Vec::dedup_by`].
+    ///
+    /// # Time Complexity
+    ///
+    /// O(N)
     ///
     /// # Examples
     ///
@@ -854,7 +865,7 @@ impl<T, const N: usize> StackVec<T, N> {
         other.len = 0;
     }
 
-    /// Moves all the elements of [Vec] into self, leaving [Vec] empty.
+    /// Moves all the elements of [`Vec`] into `self`, leaving the source empty.
     ///
     /// # Panics
     ///
@@ -882,7 +893,7 @@ impl<T, const N: usize> StackVec<T, N> {
         }
     }
 
-    /// Moves all the elements of self into [Vec], leaving self empty.
+    /// Moves all the elements of `self` into the given [`Vec`], leaving `self` empty.
     ///
     /// # Examples
     /// ```
@@ -1521,7 +1532,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// assert_eq!(v.as_slice(), [1]);
     /// assert_eq!(u, [2, 3]);
     ///
-    /// // A full range clears the vector, like `clear()` doess
+    /// // A full range clears the vector, like `clear()` does
     /// v.drain(..);
     /// assert_eq!(v, []);
     /// ```
@@ -1681,13 +1692,13 @@ impl<T, const N: usize> StackVec<T, N> {
     /// with the given `replace_with` iterator and yields the removed items.
     /// `replace_with` does not need to be the same length as `range`.
     ///
-    /// See more infomation in [`alloc::vec::Splice`], the only difference is that
-    /// we require the `replace_with` is [`ExactSizeIterator`]`.
+    /// See [`alloc::vec::Splice`] for details; unlike `Vec::splice`, this requires
+    /// `replace_with` to implement [`ExactSizeIterator`].
     ///
     /// This is optimal if:
     ///
     /// * The tail (elements in the vector after `range`) is empty,
-    /// * or `replace_with` yields fewer or equal elements than `range`'s length
+    /// * or `replace_with` yields elements equal to `range`'s length.
     ///
     /// # Panics
     ///
@@ -1819,7 +1830,7 @@ pub struct ExtractIf<'a, T, F: FnMut(&mut T) -> bool, const N: usize> {
 impl<T, const N: usize> StackVec<T, N> {
     /// Creates an iterator which uses a closure to determine if an element in the range should be removed.
     ///
-    /// See more infomation in [`Vec::extract_if`] .
+    /// See more information in [`Vec::extract_if`].
     ///
     /// # Panics
     ///

@@ -21,13 +21,10 @@ pub enum InnerVecMut<'a, T, const N: usize> {
     Heap(&'a mut Vec<T>),
 }
 
-/// A vector stored on stack by default, auto move to heap when capacity is insufficient.
+/// Stack-first vector that moves to the heap when capacity is exceeded.
 ///
-/// This type is useful when you are unsure of the length of the data but know that the amount of data is small.
-/// At this point, using this container can avoid the overhead of heap requests.
-///
-/// Most methods are similar to [alloc::vec::Vec] .
-/// Internally, it is actually an enumeration that stores either [`StackVec`] or [`Vec`].
+/// Useful when data is usually small; avoids heap allocations in the common case.
+/// API mirrors [`Vec`]. Internally stores either a [`StackVec`] or a [`Vec`].
 ///
 /// # Example
 ///
@@ -35,34 +32,29 @@ pub enum InnerVecMut<'a, T, const N: usize> {
 /// use fastvec::AutoVec;
 /// use core::iter::Extend;
 ///
-/// // Allocate uninit memory for 5 elements on the stack,
-/// // It can be completed during compilation.
+/// // Allocate uninitialized space for 5 elements on the stack
 /// let mut vec: AutoVec<&'static str, 5> = AutoVec::new();
 ///
 /// assert_eq!(vec.len(), 0);
 /// assert_eq!(vec.capacity(), 5);
 ///
-/// // Then you can use it like alloc::vec::Vec,
-/// // The only difference is that data will exist in the stack
-/// // if the capacity is sufficient.
+/// // Use like `Vec`; stays on stack while within capacity
 /// vec.push("Hello");
 /// vec.push("world");
 ///
 /// assert_eq!(vec, ["Hello", "world"]);
 ///
-/// // If the capacity is insufficient,
-/// // the data will be automatically moved to the heap.
-/// vec.extend(&["2025", "12", "14", "1:15"]);
+/// // Exceeding capacity automatically moves data to the heap
+/// vec.extend(["2025", "12", "14", "1:15"]);
 /// assert!(!vec.in_stack());
 /// assert_eq!(vec, ["Hello", "world", "2025", "12", "14", "1:15"]);
 ///
-/// // You can force it to move to the stack,
-/// // which will deconstruct the excess content.
+/// // Force move to stack (truncates if needed)
 /// vec.force_to_stack();
 /// assert!(vec.in_stack());
 /// assert_eq!(vec, ["Hello", "world", "2025", "12", "14"]);
 ///
-/// // If necessary, convert to Vec.
+/// // Convert to `Vec` if needed
 /// let vec: Vec<&'static str> = vec.into_vec();
 /// ```
 #[derive(Clone)]
@@ -83,7 +75,7 @@ impl<T, const N: usize> From<StackVec<T, N>> for AutoVec<T, N> {
     }
 }
 
-/// Creates a `StackVec` containing the arguments.
+/// Creates a [`AutoVec`] containing the arguments.
 ///
 /// The syntax is similar to [`vec!`](https://doc.rust-lang.org/std/macro.vec.html) .
 ///
@@ -119,8 +111,11 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// # Examples
     ///
     /// ```
-    /// # use fastvec::AutoVec;
-    /// let mut vec: AutoVec<i32, 8> = AutoVec::new();
+    /// # use fastvec::{AutoVec, autovec};
+    /// let vec: AutoVec<i32, 8> = AutoVec::new();
+    ///
+    /// // eq to this
+    /// let vec: AutoVec<i32, 8> = autovec![];
     /// ```
     #[inline]
     pub const fn new() -> Self {
@@ -133,6 +128,20 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// But it is possible to move stack data to the heap (if the capacity is insufficient).
     ///
     /// Unlike [`StackVec::force_cast`], this function will not delete data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let vec: AutoVec<_, 5> = autovec![1, 2, 3];
+    ///
+    /// let vec: AutoVec<_, 8> = vec.force_cast();
+    /// assert!(vec.in_stack());
+    ///
+    /// let vec: AutoVec<_, 2> = vec.force_cast();
+    /// assert!(!vec.in_stack());
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
     #[inline]
     pub fn force_cast<const P: usize>(self) -> AutoVec<T, P> {
         match self.0 {
@@ -188,15 +197,16 @@ impl<T, const N: usize> AutoVec<T, N> {
     ///
     /// If the array length is greater than `N`, heap storage will be used.
     ///
-    /// # Panics
-    /// Panics if array length > N.
-    ///
     /// # Examples
     /// ```
     /// # use fastvec::AutoVec;
     /// let vec: AutoVec<i32, 5> = AutoVec::from_buf([1, 2, 3]);
     /// assert_eq!(vec.len(), 3);
     /// assert!(vec.in_stack());
+    ///
+    /// let vec: AutoVec<i32, 3> = AutoVec::from_buf([1, 2, 3, 4, 5]);
+    /// assert_eq!(vec, [1, 2, 3, 4, 5]);
+    /// assert!(!vec.in_stack());
     /// ```
     #[inline]
     pub fn from_buf<const P: usize>(arr: [T; P]) -> Self {
@@ -281,8 +291,8 @@ impl<T, const N: usize> AutoVec<T, N> {
     ///
     /// The collection may reserve more space to speculatively avoid frequent reallocations.
     ///
-    /// This function may move data.
-    /// If the target capacity <= N, this will move the data to the stack.
+    /// - If the target capacity <= N, this will move the data to the stack.
+    /// - If the target capacity > N, this will move the data to the heap.
     ///
     /// # Examples
     ///
@@ -320,18 +330,18 @@ impl<T, const N: usize> AutoVec<T, N> {
 
     /// Reserves capacity for at least additional more elements to be inserted in the given `AutoVec`.
     ///
-    /// This function may move data.
-    /// If the target capacity <= N, this will move the data to the stack.
+    /// - If the target capacity <= N, this will move the data to the stack.
+    /// - If the target capacity > N, this will move the data to the heap.
     ///
     /// # Examples
     ///
     /// ```
     /// # use fastvec::{AutoVec, autovec};
     /// let mut vec: AutoVec<i32, 8> = autovec![];
-    /// vec.reserve(5);
+    /// vec.reserve_exact(5);
     /// assert!(vec.in_stack());
     ///
-    /// vec.reserve(10);
+    /// vec.reserve_exact(10);
     /// assert!(!vec.in_stack());
     /// assert_eq!(vec.capacity(), 10);
     /// ```
@@ -397,7 +407,8 @@ impl<T, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Returns a raw pointer to the vector’s buffer, or a dangling raw pointer valid for zero sized reads.
+    /// Returns a raw pointer to the buffer, or a dangling pointer
+    /// valid for zero-sized reads if `T` is a zero-sized type.
     #[inline]
     pub const fn as_ptr(&self) -> *const T {
         match &self.0 {
@@ -406,7 +417,8 @@ impl<T, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Returns a raw pointer to the vector’s buffer, or a dangling raw pointer valid for zero sized reads.
+    /// Returns a raw mutable pointer to the buffer, or a dangling pointer
+    /// valid for zero-sized reads if `T` is a zero-sized type.
     #[inline]
     pub const fn as_mut_ptr(&mut self) -> *mut T {
         match &mut self.0 {
@@ -416,6 +428,14 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Returns the number of elements in the vector, also referred to as its ‘length’.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<i32, 8> = autovec![1, 2, 3];
+    /// assert_eq!(vec.len(), 3);
+    /// ```
     #[inline]
     pub const fn len(&self) -> usize {
         match &self.0 {
@@ -444,6 +464,17 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Returns true if the vector contains no elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<i32, 8> = autovec![];
+    /// assert!(vec.is_empty());
+    ///
+    /// vec.push(1);
+    /// assert!(!vec.is_empty());
+    /// ```
     #[inline]
     pub const fn is_empty(&self) -> bool {
         match &self.0 {
@@ -454,7 +485,18 @@ impl<T, const N: usize> AutoVec<T, N> {
 
     /// Returns the total number of elements the vector can hold without reallocating.
     ///
-    /// For [StackVec], this is always equal to `N` .
+    /// For [`StackVec`], this is always equal to `N` .
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<i32, 3> = autovec![];
+    /// assert_eq!(vec.capacity(), 3);
+    ///
+    /// vec.extend([1, 2, 3, 4]);
+    /// assert!(vec.capacity() >= 4);
+    /// ```
     #[inline]
     pub const fn capacity(&self) -> usize {
         match &self.0 {
@@ -469,6 +511,23 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// If the data is in the heap, will not reallocate memory.
     ///
     /// Therefore, this function is efficient, but the returned [`Vec`] may not be tight.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let vec: AutoVec<i32, 3> = autovec![1, 2];
+    /// assert!(vec.in_stack());
+    /// let vec: Vec<_> = vec.into_vec();
+    /// assert_eq!(vec, [1, 2]);
+    /// assert!(vec.capacity() == 2);
+    ///
+    /// let vec: AutoVec<i32, 3> = autovec![1, 2, 3, 4, 5];
+    /// assert!(!vec.in_stack());
+    /// let vec: Vec<_> = vec.into_vec();
+    /// assert_eq!(vec, [1, 2, 3, 4, 5]);
+    /// assert!(vec.capacity() >= 5);
+    /// ```
     #[inline]
     pub fn into_vec(self) -> Vec<T> {
         match self.0 {
@@ -497,6 +556,19 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// If the length exceeds the capacity, [`truncate`](StackVec::truncate) will be called.
     ///
     /// If the data is already in the stack, it won't do anything.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let vec: AutoVec<i32, 3> = autovec![1, 2];
+    /// let vec = vec.truncate_into_stack();
+    /// assert_eq!(vec, [1, 2]);
+    ///
+    /// let vec: AutoVec<i32, 3> = autovec![1, 2, 3, 4, 5];
+    /// let vec = vec.truncate_into_stack();
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
     #[inline]
     pub fn truncate_into_stack(mut self) -> StackVec<T, N> {
         if let InnerVec::Heap(vec) = &mut self.0 {
@@ -509,12 +581,36 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Convert to internal container.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec, auto_vec::InnerVec};
+    /// let vec: AutoVec<i32, 3> = autovec![1, 2];
+    ///
+    /// match vec.into_inner() {
+    ///     InnerVec::Stack(stack_vec) => { /* ... */ },
+    ///     InnerVec::Heap(vec) => { /* ... */ },
+    /// }
+    /// ```
     #[inline(always)]
     pub fn into_inner(self) -> InnerVec<T, N> {
         self.0
     }
 
     /// Return the reference of inner vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec, auto_vec::InnerVecRef};
+    /// let vec: AutoVec<i32, 3> = autovec![1, 2];
+    ///
+    /// match vec.inner_ref() {
+    ///     InnerVecRef::Stack(stack_vec) => { /* ... */ },
+    ///     InnerVecRef::Heap(vec) => { /* ... */ },
+    /// }
+    /// ```
     #[inline(always)]
     pub fn inner_ref(&self) -> InnerVecRef<'_, T, N> {
         match &self.0 {
@@ -524,6 +620,18 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Return the mutable reference of inner vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec, auto_vec::InnerVecMut};
+    /// let mut vec: AutoVec<i32, 3> = autovec![1, 2];
+    ///
+    /// match vec.inner_mut() {
+    ///     InnerVecMut::Stack(stack_vec) => { /* ... */ },
+    ///     InnerVecMut::Heap(vec) => { /* ... */ },
+    /// }
+    /// ```
     #[inline(always)]
     pub fn inner_mut(&mut self) -> InnerVecMut<'_, T, N> {
         match &mut self.0 {
@@ -533,6 +641,8 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Converts the [`AutoVec`] into [`Box<[T]>`](Box).
+    ///
+    /// This function is eq to [`AutoVec::shrink_into_vec`] + [`Vec::into_boxed_slice`] .
     #[inline]
     pub fn into_boxed_slice(self) -> Box<[T]> {
         match self.0 {
@@ -546,6 +656,16 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// If `len` is greater or equal to the vector’s current length, this has no effect.
     ///
     /// Note that this will not modify the capacity, so it will not move data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<i32, 5> = autovec![1, 2, 3, 4];
+    /// vec.truncate(2);
+    /// assert_eq!(vec, [1, 2]);
+    /// assert_eq!(vec.capacity(), 5);
+    /// ```
     #[inline]
     pub fn truncate(&mut self, len: usize) {
         match &mut self.0 {
@@ -581,6 +701,16 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<i32, 5> = autovec![0, 1, 2, 3];
+    /// let x = vec.swap_remove(1);
+    /// assert_eq!(x, 1);
+    /// assert_eq!(vec, [0, 3, 2]);
+    /// ```
     pub fn swap_remove(&mut self, index: usize) -> T {
         match &mut self.0 {
             InnerVec::Stack(vec) => vec.swap_remove(index),
@@ -593,7 +723,7 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// If the heap is insufficient, it will switch to [`Vec`] and reserve some additional memory.
     ///
     /// # Panics
-    /// Panics if index > len.
+    /// Panics if `index > len`.
     ///
     /// # Examples
     /// ```
@@ -668,6 +798,19 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// Retains only the elements specified by the predicate.
     ///
     /// This function does not affect the position (stack/heap) of the data.
+    ///
+    /// # Time complexity
+    ///
+    /// O(N)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<_, 4> = autovec![1, 2, 3, 4];
+    /// vec.retain(|v|  *v % 2  == 0);
+    /// assert_eq!(vec, [2, 4]);
+    /// ```
     #[inline]
     pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F) {
         match &mut self.0 {
@@ -677,6 +820,21 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Retains only the elements specified by the predicate, passing a mutable reference to it.
+    ///
+    /// This function does not affect the position (stack/heap) of the data.
+    ///
+    /// # Time complexity
+    ///
+    /// O(N)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<_, 4> = autovec![1, 2, 3, 4];
+    /// vec.retain_mut(|v|{ *v += 10;  *v % 2  == 0 });
+    /// assert_eq!(vec, [12, 14]);
+    /// ```
     #[inline]
     pub fn retain_mut<F: FnMut(&mut T) -> bool>(&mut self, f: F) {
         match &mut self.0 {
@@ -686,6 +844,12 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Removes all but the first of consecutive elements in the vector that resolve to the same key.
+    ///
+    /// # Time complexity
+    ///
+    /// O(N)
+    ///
+    /// See [`Vec::dedup_by_key`].
     #[inline]
     pub fn dedup_by_key<F, K>(&mut self, key: F)
     where
@@ -699,6 +863,12 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Removes all but the first of consecutive elements in the vector satisfying a given equality relation.
+    ///
+    /// # Time complexity
+    ///
+    /// O(N)
+    ///
+    /// See [`Vec::dedup_by`].
     #[inline]
     pub fn dedup_by<F: FnMut(&mut T, &mut T) -> bool>(&mut self, same_bucket: F) {
         match &mut self.0 {
@@ -709,7 +879,7 @@ impl<T, const N: usize> AutoVec<T, N> {
 
     /// Appends an element to the back of a collection.
     ///
-    /// If the heap is insufficient, it will switch to [`Vec`] and reserve some additional memory.
+    /// If the stack capacity is insufficient, it will switch to [`Vec`] and reserve some additional memory.
     ///
     /// # Time complexity
     /// Takes amortized O(1) time. If the vector’s length would exceed its capacity after the push,
@@ -752,7 +922,7 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// This function does not affect the position (stack/heap) of the data.
     ///
     /// # Time complexity
-    /// O(1) time
+    /// O(1)
     ///
     /// # Examples
     /// ```
@@ -771,6 +941,21 @@ impl<T, const N: usize> AutoVec<T, N> {
 
     /// Removes and returns the last element from a vector if the predicate returns `true`,
     /// or `None` if the predicate returns false or the vector is empty (the predicate will not be called in that case).
+    ///
+    /// # Time complexity
+    /// O(1)
+    ///
+    /// # Examples
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<_, 4> = autovec![1, 2, 3];
+    ///
+    /// assert_eq!(vec.pop_if(|v| *v == 2 ), None);
+    /// assert_eq!(vec, [1, 2, 3]);
+    ///
+    /// assert_eq!(vec.pop_if(|v| *v == 3 ), Some(3));
+    /// assert_eq!(vec, [1, 2]);
+    /// ```
     #[inline]
     pub fn pop_if(&mut self, predicate: impl FnOnce(&mut T) -> bool) -> Option<T> {
         match &mut self.0 {
@@ -780,6 +965,8 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Moves all the elements of other into self, leaving other empty.
+    ///
+    /// If you want to append other types of arrays, it is recommended to use [`Extend`] trait.
     ///
     /// This function does not affect the capacity of **other**,
     /// so not affect the position (stack/heap) of the other data.
@@ -810,6 +997,8 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Moves all the elements of [`StackVec`] into self, leaving [`StackVec`] empty.
+    ///
+    /// Because knowing the exact length, this is faster than [`Extend`] .
     pub fn append_stack_vec<const P: usize>(&mut self, other: &mut StackVec<T, P>) {
         match &mut self.0 {
             InnerVec::Stack(vec) => {
@@ -828,6 +1017,8 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Moves all the elements of [`Vec`] into self, leaving [`Vec`] empty.
+    ///
+    /// Because knowing the exact length, this is faster than [`Extend`] .
     pub fn append_vec(&mut self, other: &mut Vec<T>) {
         match &mut self.0 {
             InnerVec::Stack(vec) => {
@@ -936,6 +1127,19 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// Consumes and leaks the [`AutoVec`], returning a mutable reference to the contents, `&'a mut [T]`.
     ///
     /// This will pre transfer the data to the heap to ensure the validity of the references.
+    ///
+    /// See more information in [`Vec::leak`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let vec : AutoVec<_, 4> = autovec![1, 2, 3];
+    ///
+    /// let vec: &'static mut [i32] = vec.leak();
+    /// vec[1] = 0;
+    /// assert_eq!(vec, [1, 0, 3]);
+    /// ```
     #[inline]
     pub fn leak<'a>(self) -> &'a mut [T] {
         self.into_vec().leak()
@@ -1008,11 +1212,11 @@ impl<T: Clone, const N: usize> AutoVec<T, N> {
     /// # use fastvec::{AutoVec, autovec};
     /// let mut vec: AutoVec<_, 5> = autovec!["hello"];
     /// vec.resize(3, "world");
-    /// assert_eq!(vec.as_slice(), ["hello", "world", "world"]);
+    /// assert_eq!(vec, ["hello", "world", "world"]);
     ///
     /// let mut vec: AutoVec<_, 5> = autovec!['a', 'b', 'c', 'd'];
     /// vec.resize(2, '_');
-    /// assert_eq!(vec.as_slice(), ['a', 'b']);
+    /// assert_eq!(vec, ['a', 'b']);
     /// ```
     #[inline]
     pub fn resize(&mut self, new_len: usize, value: T) {
@@ -1058,7 +1262,16 @@ impl<T: Clone, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Given a range src, clones a slice of elements in that range and appends it to the end..
+    /// Given a range src, clones a slice of elements in that range and appends it to the end.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<_, 5> = autovec![0, 1, 2, 3, 4];
+    /// vec.extend_from_within(1..3);
+    /// assert_eq!(vec, [0, 1, 2, 3, 4, 1, 2]);
+    /// ```
     #[inline]
     pub fn extend_from_within<R: core::ops::RangeBounds<usize>>(&mut self, src: R) {
         match &mut self.0 {
@@ -1081,6 +1294,29 @@ impl<T: Clone, const N: usize> AutoVec<T, N> {
 
 impl<T: PartialEq, const N: usize> AutoVec<T, N> {
     /// Removes consecutive repeated elements in the vector according to the PartialEq trait implementation.
+    ///
+    /// # Time Complexity
+    ///
+    /// O(N)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<_, 10> = autovec![0, 0, 1, 2, 2, 0];
+    /// vec.dedup();
+    /// assert_eq!(vec, [0, 1, 2, 0]);
+    /// ```
+    ///
+    /// It can be combined with sorting.
+    ///
+    /// ```
+    /// # use fastvec::{AutoVec, autovec};
+    /// let mut vec: AutoVec<_, 10> = autovec![0, 0, 1, 2, 2, 0, 1, 4];
+    /// vec.sort();
+    /// vec.dedup();
+    /// assert_eq!(vec, [0, 1, 2, 4]);
+    /// ```
     #[inline]
     pub fn dedup(&mut self) {
         match &mut self.0 {
@@ -1151,7 +1387,9 @@ impl<'a, T: 'a + Clone, const N: usize> Extend<&'a T> for AutoVec<T, N> {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
         let iter = iter.into_iter();
         let (hint, _) = iter.size_hint();
-        self.reserve(hint);
+        if hint > 0 {
+            self.reserve(hint);
+        }
 
         for item in iter {
             self.push(item.clone());
@@ -1163,7 +1401,10 @@ impl<T, const N: usize> Extend<T> for AutoVec<T, N> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         let iter = iter.into_iter();
         let (hint, _) = iter.size_hint();
-        self.reserve(hint);
+        if hint > 0 {
+            self.reserve(hint);
+        }
+
         for item in iter {
             self.push(item);
         }
@@ -1279,7 +1520,9 @@ impl<T, const N: usize> IntoIterator for AutoVec<T, N> {
     }
 }
 
-/// An iterator that consumes a [`AutoVec`] and yields its items by value.
+/// An iterator that consumes an [`AutoVec`] and yields its items by value.
+///
+/// See [`IntoIterator::into_iter`] .
 #[derive(Clone)]
 pub enum IntoIter<T, const N: usize> {
     Stack(crate::stack_vec::IntoIter<T, N>),
@@ -1470,13 +1713,13 @@ impl<T, const N: usize> AutoVec<T, N> {
     /// with the given `replace_with` iterator and yields the removed items.
     /// `replace_with` does not need to be the same length as `range`.
     ///
-    /// See more infomation in [`alloc::vec::Splice`], the only difference is that
-    /// we require the `replace_with` is [`ExactSizeIterator`]`.
+    /// See [`alloc::vec::Splice`] for details; unlike `Vec::splice`, this requires
+    /// `replace_with` to implement [`ExactSizeIterator`].
     ///
     /// This is optimal if:
     ///
     /// * The tail (elements in the vector after `range`) is empty,
-    /// * or `replace_with` yields fewer or equal elements than `range`'s length
+    /// * or `replace_with` yields elements equal to `range`'s length
     ///
     /// If the capacity is insufficient, this will first switch to the heap and then call splice.
     ///
@@ -1587,7 +1830,7 @@ pub enum ExtractIf<'a, T, F: FnMut(&mut T) -> bool, const N: usize> {
 impl<T, const N: usize> AutoVec<T, N> {
     /// Creates an iterator which uses a closure to determine if an element in the range should be removed.
     ///
-    /// See more infomation in [`Vec::extract_if`] .
+    /// See more information in [`Vec::extract_if`].
     ///
     /// # Panics
     ///

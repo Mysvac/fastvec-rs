@@ -46,7 +46,7 @@ let mut vec: AutoVec<i32, 5> = autovec![1, 2, 3];
 assert!(vec.in_stack());  // Still on stack
 
 // Push beyond capacity—automatically migrates to heap
-vec.extend(&[4, 5, 6, 7, 8]);
+vec.extend([4, 5, 6, 7, 8]);
 assert!(!vec.in_stack()); // Now on heap
 ```
 

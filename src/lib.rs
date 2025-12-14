@@ -47,12 +47,12 @@
 //! assert!(vec.in_stack());  // Still on stack
 //!
 //! // Push beyond capacity—automatically migrates to heap
-//! vec.extend(&[4, 5, 6, 7, 8]);
+//! vec.extend([4, 5, 6, 7, 8]);
 //! assert!(!vec.in_stack()); // Now on heap
 //! ```
 //!
-//! Note: When the amount of data is large, this is not as good as [`Vec`]
-//! because its operation usually requires an additional judgment.
+//! Note: For large collections, [`AutoVec`] adds a small overhead vs [`Vec`]
+//! due to a branch to select stack or heap storage. Benchmark your use case.
 //!
 //! ## Comparison
 //!
@@ -60,11 +60,11 @@
 //! |---------|----------|---------|----------|-----|
 //! | Stack storage | ✓ | ✓ | ✓ | ✗ |
 //! | Flexible capacity | ✗ | ✓ | ✓ | ✓ |
-//! | Speed | A | B | B | B~C |
+//!
 //!
 //! See detailed documentation in [`StackVec`] and [`AutoVec`] for method signatures and examples.
 //!
-//! ### Alias
+//! ### Aliases
 //!
 //! - [`MiniVec<T>`] = `AutoVec<T, 8>` — for tiny collections
 //! - [`FastVec<T>`] = `AutoVec<T, 16>` — general-purpose balance
@@ -78,13 +78,14 @@
 //! ### `serde`
 //!
 //! When this optional dependency is enabled,
-//! [`StackVec`] and [`AutoVec`] implements the [`serde::Serialize`] and [`serde::Deserialize`] traits.
+//! [`StackVec`] and [`AutoVec`] implement the [`serde::Serialize`] and [`serde::Deserialize`] traits.
 //!
 //!
-//! [`serde::Serialize`]: https://docs.rs/smallvec/latest/serde
-//! [`serde::Deserialize`]: https://docs.rs/smallvec/latest/serde
+//! [`serde::Serialize`]: https://docs.rs/serde/latest/serde/trait.Serialize.html
+//! [`serde::Deserialize`]: https://docs.rs/serde/latest/serde/trait.Deserialize.html
 //! [`SmallVec`]: https://docs.rs/smallvec/latest/smallvec
 //! [`Vec`]: alloc::vec::Vec
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![no_std]
 
 extern crate alloc;

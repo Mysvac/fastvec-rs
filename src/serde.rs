@@ -7,6 +7,7 @@ use serde_core::{
     ser::SerializeSeq,
 };
 
+#[cfg(feature = "serde")]
 impl<T: Serialize, const N: usize> Serialize for StackVec<T, N> {
     /// Serialize a `StackVec` as a sequence.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -21,6 +22,7 @@ impl<T: Serialize, const N: usize> Serialize for StackVec<T, N> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<T: Serialize, const N: usize> Serialize for AutoVec<T, N> {
     /// Serialize an `AutoVec` as a sequence.
     ///
@@ -37,6 +39,7 @@ impl<T: Serialize, const N: usize> Serialize for AutoVec<T, N> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for AutoVec<T, N> {
     /// Deserialize an `AutoVec` from a sequence.
     ///
@@ -80,6 +83,7 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for AutoVec<T, N
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for StackVec<T, N> {
     /// Deserialize a `StackVec` from a sequence.
     ///
