@@ -1,4 +1,26 @@
+/// See [`core::hint::cold_path`](https://doc.rust-lang.org/beta/core/hint) .
+#[cfg(feature = "nightly")]
+pub(crate) use core::hint::cold_path;
+
+/// See [`core::hint::cold_path`](https://doc.rust-lang.org/beta/core/hint) .
+#[cfg(not(feature = "nightly"))]
 #[inline(always)]
+pub(crate) const fn cold_path() {}
+
+/// choose min non-zero capacity for type T
+#[inline(always)]
+pub(crate) const fn min_cap<T>() -> usize {
+    let size = core::mem::size_of::<T>();
+    if size < 1 {
+        8
+    } else if size <= 1024 {
+        4
+    } else {
+        1
+    }
+}
+
+#[inline(never)]
 pub(crate) fn split_range_bound(
     src: &impl core::ops::RangeBounds<usize>,
     len: usize,
@@ -14,6 +36,9 @@ pub(crate) fn split_range_bound(
         core::ops::Bound::Excluded(&i) => i,
         core::ops::Bound::Unbounded => len,
     };
+
+    assert!(start <= end, "drain start greater than end");
+    assert!(end <= len, "drain end out of bounds");
     (start, end)
 }
 

@@ -329,7 +329,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// # Safety
     /// The Vec's length must be less than or equal to `N` (the StackVec's capacity).
     #[inline(always)]
-    pub unsafe fn from_vec_uncheck(vec: &mut Vec<T>) -> Self {
+    pub unsafe fn from_vec_unchecked(vec: &mut Vec<T>) -> Self {
         let mut res = Self::new();
         res.len = vec.len();
 
@@ -397,10 +397,11 @@ impl<T, const N: usize> StackVec<T, N> {
     /// # Safety
     /// The caller must ensure `len <= capacity`.
     #[inline(always)]
-    pub unsafe fn into_vec_with_capacity_uncheck(&mut self, capacity: usize) -> Vec<T> {
+    pub unsafe fn into_vec_with_capacity_unchecked(&mut self, capacity: usize) -> Vec<T> {
         let mut vec: Vec<T> = Vec::with_capacity(capacity);
 
         unsafe {
+            core::hint::assert_unchecked(self.len <= capacity);
             ptr::copy_nonoverlapping(self.as_ptr(), vec.as_mut_ptr(), self.len);
             vec.set_len(self.len);
             self.len = 0;
@@ -442,8 +443,9 @@ impl<T, const N: usize> StackVec<T, N> {
     /// # Safety
     /// The vector must not be full: `self.len() < N`.
     #[inline(always)]
-    pub const unsafe fn push_uncheck(&mut self, value: T) {
+    pub const unsafe fn push_unchecked(&mut self, value: T) {
         unsafe {
+            core::hint::assert_unchecked(self.len < self.capacity());
             ptr::write(self.as_mut_ptr().add(self.len), value);
         }
         self.len += 1;
@@ -469,10 +471,12 @@ impl<T, const N: usize> StackVec<T, N> {
     #[inline]
     pub const fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
+            crate::utils::cold_path();
             None
         } else {
             unsafe {
                 self.len -= 1;
+                core::hint::assert_unchecked(self.len < self.capacity());
                 Some(ptr::read(self.as_ptr().add(self.len)))
             }
         }
@@ -495,16 +499,18 @@ impl<T, const N: usize> StackVec<T, N> {
     #[inline]
     pub fn pop_if(&mut self, predicate: impl FnOnce(&mut T) -> bool) -> Option<T> {
         if self.len == 0 {
-            return None;
-        }
-
-        unsafe {
-            let ptr = self.as_mut_ptr().add(self.len - 1);
-            if predicate(&mut *ptr) {
-                self.len -= 1;
-                Some(ptr::read(ptr))
-            } else {
-                None
+            crate::utils::cold_path();
+            None
+        } else {
+            unsafe {
+                core::hint::assert_unchecked(self.len > 0);
+                let ptr = self.as_mut_ptr().add(self.len - 1);
+                if predicate(&mut *ptr) {
+                    self.len -= 1;
+                    Some(ptr::read(ptr))
+                } else {
+                    None
+                }
             }
         }
     }
@@ -549,7 +555,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// - len < capacity (before insert)
     /// - index <= len
     #[inline(always)]
-    pub unsafe fn insert_uncheck(&mut self, index: usize, element: T) {
+    pub unsafe fn insert_unchecked(&mut self, index: usize, element: T) {
         // assert!(index <= N, "insertion index should be <= len");
         unsafe {
             let ptr = self.as_mut_ptr().add(index);
@@ -584,9 +590,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// ```
     #[inline]
     pub const fn swap_remove(&mut self, index: usize) -> T {
-        if index >= self.len {
-            panic!("removal index should be < len");
-        }
+        assert!(index < self.len, "removal index should be < len");
 
         unsafe {
             let base_ptr = self.as_mut_ptr();
@@ -853,15 +857,16 @@ impl<T, const N: usize> StackVec<T, N> {
     /// assert_eq!(vec2, []);
     /// ```
     pub fn append<const P: usize>(&mut self, other: &mut StackVec<T, P>) {
+        let other_len = other.len();
         assert!(
-            self.len + other.len <= N,
+            self.len + other_len <= N,
             "Insufficient capacity during append."
         );
 
         unsafe {
-            ptr::copy_nonoverlapping(other.as_ptr(), self.as_mut_ptr().add(self.len), other.len);
+            ptr::copy_nonoverlapping(other.as_ptr(), self.as_mut_ptr().add(self.len), other_len);
         }
-        self.len += other.len;
+        self.len += other_len;
         other.len = 0;
     }
 
@@ -882,9 +887,11 @@ impl<T, const N: usize> StackVec<T, N> {
     /// ```
     pub fn append_vec(&mut self, other: &mut Vec<T>) {
         let other_len = other.len();
-        if self.len + other_len > N {
-            panic!("Insufficient capacity during append.");
-        }
+
+        assert!(
+            self.len + other_len <= N,
+            "Insufficient capacity during append."
+        );
 
         unsafe {
             ptr::copy_nonoverlapping(other.as_ptr(), self.as_mut_ptr().add(self.len), other_len);
@@ -1161,8 +1168,6 @@ impl<T: Clone, const N: usize> StackVec<T, N> {
     /// ```
     pub fn extend_from_within<R: core::ops::RangeBounds<usize>>(&mut self, src: R) {
         let (start, end) = crate::utils::split_range_bound(&src, self.len);
-        assert!(start <= end, "drain start greater than end");
-        assert!(end <= self.len, "drain end out of bounds");
         assert!(
             end - start + self.len <= N,
             "the length should be <= capacity"
@@ -1243,7 +1248,7 @@ impl<T: Clone, const N: usize> Clone for StackVec<T, N> {
     fn clone(&self) -> Self {
         let mut vec = Self::new();
         for item in self.as_slice() {
-            unsafe { vec.push_uncheck(item.clone()) };
+            unsafe { vec.push_unchecked(item.clone()) };
         }
         vec
     }
@@ -1251,7 +1256,7 @@ impl<T: Clone, const N: usize> Clone for StackVec<T, N> {
     fn clone_from(&mut self, source: &Self) {
         self.clear();
         for item in source.as_slice() {
-            unsafe { self.push_uncheck(item.clone()) };
+            unsafe { self.push_unchecked(item.clone()) };
         }
     }
 }
@@ -1311,7 +1316,7 @@ impl<T: Clone, const N: usize> From<&[T]> for StackVec<T, N> {
         let mut vec = Self::new();
         for items in value {
             unsafe {
-                vec.push_uncheck(items.clone());
+                vec.push_unchecked(items.clone());
             }
         }
         vec
@@ -1324,7 +1329,7 @@ impl<T: Clone, const N: usize, const P: usize> From<&[T; P]> for StackVec<T, N> 
         let mut vec = Self::new();
         for items in value {
             unsafe {
-                vec.push_uncheck(items.clone());
+                vec.push_unchecked(items.clone());
             }
         }
         vec
@@ -1351,7 +1356,7 @@ impl<T, const N: usize, const P: usize> From<[T; P]> for StackVec<T, N> {
         let mut vec = Self::new();
         for items in value {
             unsafe {
-                vec.push_uncheck(items);
+                vec.push_unchecked(items);
             }
         }
         vec
@@ -1364,7 +1369,7 @@ impl<T, const N: usize> From<Box<[T]>> for StackVec<T, N> {
         let mut vec = Self::new();
         for items in value {
             unsafe {
-                vec.push_uncheck(items);
+                vec.push_unchecked(items);
             }
         }
         vec
@@ -1540,8 +1545,6 @@ impl<T, const N: usize> StackVec<T, N> {
         let len = self.len;
 
         let (start, end) = crate::utils::split_range_bound(&range, len);
-        assert!(start <= end, "drain start greater than end");
-        assert!(end <= len, "drain end out of bounds");
 
         unsafe {
             self.len = start;
@@ -1790,7 +1793,7 @@ impl<'a, I: ExactSizeIterator, const N: usize> Drop for Splice<'a, I, N> {
             if new_tail_start != self.drain.tail_start {
                 assert!(
                     new_tail_start + self.drain.tail_len <= N,
-                    "the length should be <= capacity"
+                    "the result length in splice should be <= capacity"
                 );
 
                 let src = vec.as_ptr().add(self.drain.tail_start);

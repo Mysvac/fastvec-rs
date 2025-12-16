@@ -1,4 +1,4 @@
-use crate::{AutoVec, StackVec};
+use crate::{FastVec, StackVec};
 use alloc::format;
 use core::marker::PhantomData;
 use serde_core::{
@@ -23,8 +23,8 @@ impl<T: Serialize, const N: usize> Serialize for StackVec<T, N> {
 }
 
 #[cfg(feature = "serde")]
-impl<T: Serialize, const N: usize> Serialize for AutoVec<T, N> {
-    /// Serialize an `AutoVec` as a sequence.
+impl<T: Serialize, const N: usize> Serialize for FastVec<T, N> {
+    /// Serialize an `FastVec` as a sequence.
     ///
     /// The serialization format is identical whether the data is stored on the stack or heap.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -32,7 +32,7 @@ impl<T: Serialize, const N: usize> Serialize for AutoVec<T, N> {
         S: Serializer,
     {
         let mut seq = serializer.serialize_seq(Some(self.len()))?;
-        for element in self {
+        for element in self.get_ref().as_slice() {
             seq.serialize_element(element)?;
         }
         seq.end()
@@ -40,8 +40,8 @@ impl<T: Serialize, const N: usize> Serialize for AutoVec<T, N> {
 }
 
 #[cfg(feature = "serde")]
-impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for AutoVec<T, N> {
-    /// Deserialize an `AutoVec` from a sequence.
+impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for FastVec<T, N> {
+    /// Deserialize an `FastVec` from a sequence.
     ///
     /// If the sequence length exceeds the stack capacity `N`, the data will be stored on the heap.
     #[inline]
@@ -49,12 +49,12 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for AutoVec<T, N
     where
         D: Deserializer<'de>,
     {
-        struct AutoVecVisitor<T, const N: usize> {
+        struct FastVecVisitor<T, const N: usize> {
             _marker: PhantomData<T>,
         }
 
-        impl<'de, T: Deserialize<'de>, const N: usize> Visitor<'de> for AutoVecVisitor<T, N> {
-            type Value = AutoVec<T, N>;
+        impl<'de, T: Deserialize<'de>, const N: usize> Visitor<'de> for FastVecVisitor<T, N> {
+            type Value = FastVec<T, N>;
 
             fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
                 formatter.write_str("a sequence")
@@ -65,19 +65,21 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for AutoVec<T, N
                 A: SeqAccess<'de>,
             {
                 let mut vec = match seq.size_hint() {
-                    Some(hint) => AutoVec::with_capacity(hint),
-                    None => AutoVec::new(),
+                    Some(hint) => FastVec::with_capacity(hint),
+                    None => FastVec::new(),
                 };
 
-                while let Some(element) = seq.next_element()? {
-                    vec.push(element);
+                let vec_mut = vec.get_mut();
+
+                while let Some(element) = seq.next_element::<T>()? {
+                    vec_mut.push(element);
                 }
 
                 Ok(vec)
             }
         }
 
-        deserializer.deserialize_seq(AutoVecVisitor {
+        deserializer.deserialize_seq(FastVecVisitor {
             _marker: PhantomData,
         })
     }
@@ -143,7 +145,7 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for StackVec<T, 
 
 #[cfg(test)]
 mod tests {
-    use crate::{AutoVec, StackVec, autovec, stackvec};
+    use crate::{FastVec, StackVec, fastvec, stackvec};
 
     #[test]
     fn stackvec_json() {
@@ -155,9 +157,9 @@ mod tests {
 
     #[test]
     fn autovec_json() {
-        let v: AutoVec<_, 5> = autovec![1, 2, 3];
+        let v: FastVec<_> = fastvec![1, 2, 3];
         let s = serde_json::to_string(&v).unwrap();
-        let r: AutoVec<i32, 5> = serde_json::from_str(&s).unwrap();
+        let r: FastVec<i32> = serde_json::from_str(&s).unwrap();
         assert_eq!(r, [1, 2, 3]);
     }
 }
