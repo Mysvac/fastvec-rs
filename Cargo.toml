@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 documentation = "https://docs.rs/fastvec"
 repository = "https://github.com/Mysvac/fastvec-rs"
-description = "A vector crate that stores small data on the stack and automatically spills to the heap when needed."
+description = "A high-performance vector crate tuned for small data sizes."
 rust-version = "1.90.0"
 exclude = ["benchmark", ".github"]
 
