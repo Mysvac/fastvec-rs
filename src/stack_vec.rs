@@ -2,16 +2,20 @@ use alloc::{boxed::Box, vec::Vec};
 use core::{
     fmt,
     iter::FusedIterator,
-    mem::{ManuallyDrop, MaybeUninit},
+    mem::{self, ManuallyDrop, MaybeUninit},
     ptr,
 };
 
-/// A vector stored on the stack.
+use crate::utils::{IsZST, cold_path};
+
+/// A vector stored on the stack with a fixed capacity.
 ///
-/// Stored on the stack with a fixed capacity; pushing beyond capacity panics.
+/// This is useful when the data is small and the maximum quantity is determined.
 ///
-/// This type is useful when the data is usually small and you want to avoid
-/// heap allocations. It mirrors most of the API of [`Vec`].
+/// It mirrors most of the API of [`Vec`], but maintains the same high efficiency as `[T; N]`.
+///
+/// # Panics
+/// Any operation that causes `len > capacity`.
 ///
 /// # Examples
 ///
@@ -35,9 +39,17 @@ use core::{
 /// let vec: Vec<String> = vec.into_vec();
 /// // There is only one heap allocation in the entire process.
 /// ```
+///
+/// # ZST support
+///
+/// For zero sized types, this data will not allocate additional space,
+/// but the maximum capacity is still valid and cannot overflow.
+///
+/// We have made many optimizations to zero size types, many functions only
+/// modify the length, such as `push`, `copy_from_raw` ...
 pub struct StackVec<T, const N: usize> {
-    data: [MaybeUninit<T>; N],
-    len: usize,
+    pub(crate) data: [MaybeUninit<T>; N],
+    pub(crate) len: usize,
 }
 
 unsafe impl<T, const N: usize> Send for StackVec<T, N> where T: Send {}
@@ -49,7 +61,7 @@ impl<T, const N: usize> Drop for StackVec<T, N> {
         if self.len > 0 {
             // SAFETY: Ensure the validity of data within the range.
             unsafe {
-                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), self.len))
+                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), self.len));
             }
         }
     }
@@ -62,14 +74,10 @@ impl<T, const N: usize> Drop for StackVec<T, N> {
 /// You must explicitly specify the container capacity.
 /// The number of elements cannot exceed the capacity.
 ///
-/// When called with no arguments, its size is known at compile time.
-/// When all elements are explicitly listed and each element can be evaluated at compile time
-/// (e.g., `[1, 2, 3, 4]`), the compiler can also construct it at compile time.
-/// However, if the `[item; len]` syntax is used, it relies on `Clone`,
-/// which may need to be deferred to runtime (even for simple cases like `[0; 5]`).
+/// Non-params macro is eq to [`new`](`StackVec`).
 ///
 /// # Panics
-/// Panics if the number of elements exceed the capacity.
+/// Panics if the number of elements exceeds the capacity.
 ///
 /// # Examples
 ///
@@ -111,7 +119,7 @@ impl<T, const N: usize> StackVec<T, N> {
 
     /// Modify the capacity of the container.
     ///
-    /// If the capacity is insufficient, [`StackVec::truncate`] will be automatically called.
+    /// If the capacity is insufficient, [`StackVec::truncate`] will be called.
     ///
     /// # Example
     ///
@@ -129,11 +137,13 @@ impl<T, const N: usize> StackVec<T, N> {
     pub fn force_cast<const P: usize>(mut self) -> StackVec<T, P> {
         self.truncate(P);
         let mut vec = <StackVec<T, P>>::new();
-        unsafe {
-            ptr::copy_nonoverlapping(self.as_ptr(), vec.as_mut_ptr(), self.len);
-            vec.len = self.len;
-            self.len = 0;
+        if !T::IS_ZST {
+            unsafe {
+                ptr::copy_nonoverlapping(self.as_ptr(), vec.as_mut_ptr(), self.len);
+            }
         }
+        vec.len = self.len;
+        self.len = 0;
         vec
     }
 
@@ -175,53 +185,10 @@ impl<T, const N: usize> StackVec<T, N> {
         self.len = new_len
     }
 
-    /// Creates a `StackVec` directly from a pointer, a length (without capacity because it's determined).
-    ///
-    /// # Safety
-    /// This is highly unsafe, due to the number of invariants that aren’t checked:
-    /// - `T` type needs to be the same size and alignment that it was allocated with.
-    /// - `length` needs to be less than or equal to capacity `N`.
-    /// - It is necessary to avoid the incoming data being dropped twice.
-    ///
-    /// Since the container is stored on the stack, it copies the target value in bytes,
-    /// and you need to ensure that the target is not dropped again.
-    ///
-    /// See more information in [`Vec::from_raw_parts`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use fastvec::StackVec;
-    /// let mut datas = ["1".to_string(), "2".to_string()];
-    ///
-    /// let src = datas.as_mut_ptr() as *mut String;
-    ///
-    /// let vec = unsafe{ StackVec::<String, 5>::from_raw_parts(src, 2) };
-    ///
-    /// assert_eq!(vec.len(), 2);
-    ///
-    /// core::mem::forget(datas);
-    /// ```
-    #[expect(unsafe_code, reason = "The function itself is unsafe.")]
-    #[inline]
-    pub const unsafe fn from_raw_parts(ptr: *mut T, length: usize) -> Self {
-        debug_assert!(length <= N);
-
-        let mut vec = Self::new();
-
-        let dst = &raw mut vec.data as *mut T;
-
-        unsafe {
-            ptr::copy_nonoverlapping(ptr, dst, length);
-            vec.len = length;
-        }
-
-        vec
-    }
-
     /// Returns the number of elements in the vector.
     ///
     /// # Examples
+    ///
     /// ```
     /// # use fastvec::StackVec;
     /// let vec = StackVec::<String, 5>::new();
@@ -232,9 +199,41 @@ impl<T, const N: usize> StackVec<T, N> {
         self.len
     }
 
-    /// Returns the total number of elements the vector can hold without reallocating.
+    /// Returns true if the vector contains no elements.
     ///
-    /// This is always equal to `N`.
+    /// # Examples
+    /// ```
+    /// # use fastvec::{StackVec, stackvec};
+    /// let mut v = StackVec::<i32, 5>::new();
+    /// assert!(v.is_empty());
+    ///
+    /// v.push(1);
+    /// assert!(!v.is_empty());
+    /// ```
+    #[inline(always)]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Returns true if `len == N` .
+    ///
+    /// # Examples
+    /// ```
+    /// # use fastvec::{StackVec, stackvec};
+    /// let mut v = StackVec::<i32, 3>::new();
+    /// assert!(!v.is_full());
+    ///
+    /// v.extend([1, 2, 3]);
+    /// assert!(v.is_full());
+    /// ```
+    #[inline(always)]
+    pub const fn is_full(&self) -> bool {
+        self.len >= N
+    }
+
+    /// Returns the maximum number of elements the vector can hold.
+    ///
+    /// The capacity is fixed at compile time by the const generic parameter `N`.
     ///
     /// # Examples
     /// ```
@@ -247,12 +246,59 @@ impl<T, const N: usize> StackVec<T, N> {
         N
     }
 
+    /// Copy data from a ptr and create a [`StackVec`].
+    ///
+    /// This does not check for length overflow, but overflow is an undefined behavior.
+    ///
+    /// Since the container is stored on the stack, it copies the target value through
+    /// [`ptr::copy_nonoverlapping`], and you need to ensure that the target will not be dropped again.
+    ///
+    /// For zero sized type, only the length will be set (no copy).
+    ///
+    /// # Safety
+    ///
+    /// This is highly unsafe, due to the number of invariants that aren’t checked:
+    /// - `length` needs to be less than or equal to capacity `N`.
+    /// - `T` type needs to be the same size and alignment that it was allocated with.
+    /// - It is necessary to avoid the incoming data being dropped twice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::StackVec;
+    /// let mut datas = ["1".to_string(), "2".to_string()];
+    ///
+    /// let src = datas.as_mut_ptr() as *mut String;
+    ///
+    /// let vec = unsafe{ StackVec::<String, 5>::copy_from_raw(src, 2) };
+    ///
+    /// assert_eq!(vec.len(), 2);
+    ///
+    /// core::mem::forget(datas);
+    /// ```
+    #[inline(always)]
+    pub const unsafe fn copy_from_raw(ptr: *const T, length: usize) -> Self {
+        debug_assert!(length <= N);
+
+        let mut vec = Self::new();
+
+        // This judgment can be optimized by compiler.
+        if !T::IS_ZST {
+            unsafe {
+                ptr::copy_nonoverlapping(ptr, vec.as_mut_ptr(), length);
+            }
+        }
+
+        vec.len = length;
+        vec
+    }
+
     /// Creates a StackVec from an array.
     ///
     /// Copies elements from the provided array into the StackVec.
     ///
     /// # Panics
-    /// Panics if array length > N.
+    /// Panics if the length exceeds the capacity `N`.
     ///
     /// # Examples
     /// ```
@@ -262,88 +308,68 @@ impl<T, const N: usize> StackVec<T, N> {
     /// ```
     #[inline]
     pub const fn from_buf<const P: usize>(arr: [T; P]) -> Self {
-        assert!(P <= N, "array length should be <= N");
+        assert!(P <= N, "length overflow during `from_buf`");
 
-        let mut vec = Self::new();
-        unsafe {
-            ptr::copy_nonoverlapping(arr.as_ptr(), vec.as_mut_ptr(), P);
-            vec.len = P;
-        }
-        core::mem::forget(arr);
-
-        vec
+        unsafe { Self::from_buf_unchecked(arr) }
     }
 
     /// Creates a StackVec from an array without checking bounds.
     ///
     /// # Safety
-    /// - `P` (array length) must be less than or equal to `N` (capacity).
+    /// length <= capacity `N`.
     #[inline(always)]
-    pub const unsafe fn from_buf_uncheck<const P: usize>(arr: [T; P]) -> Self {
-        let mut vec = Self::new();
+    pub const unsafe fn from_buf_unchecked<const P: usize>(arr: [T; P]) -> Self {
         unsafe {
-            ptr::copy_nonoverlapping(arr.as_ptr(), vec.as_mut_ptr(), P);
-            vec.len = P;
+            let vec = Self::copy_from_raw(arr.as_ptr(), P);
+            core::mem::forget(arr);
+            vec
         }
-        core::mem::forget(arr);
-
-        vec
     }
 
     /// Converts a [`Vec`] into a [`StackVec`].
     ///
-    /// When the capacity is insufficient, Only retain the first N items.
+    /// This function copies data from the `Vec` into the `StackVec`,
+    /// then clears the `Vec`.
+    ///
+    /// # Panics
+    /// Panics if the length exceeds the capacity `N`.
     ///
     /// # Examples
     ///
     /// ```
     /// # use fastvec::StackVec;
     /// let mut vec = vec![1, 2, 3,  4];
-    /// let vec = StackVec::<i32, 5>::from_vec_truncate(&mut vec);
+    /// let vec = StackVec::<i32, 5>::from_vec(&mut vec);
     ///
     /// assert_eq!(vec.len(), 4);
     /// assert_eq!(vec.capacity(), 5);
     /// ```
     #[inline]
-    pub fn from_vec_truncate(vec: &mut Vec<T>) -> Self {
-        if vec.len() > N {
-            vec.truncate(N);
-        }
+    pub fn from_vec(vec: &mut Vec<T>) -> Self {
+        assert!(vec.len() <= N, "length overflow during `from_vec`");
 
-        let mut res = Self::new();
-        res.len = vec.len();
-
-        unsafe {
-            ptr::copy_nonoverlapping(vec.as_ptr(), res.as_mut_ptr(), res.len);
-            vec.set_len(0);
-        }
-
-        res
+        unsafe { Self::from_vec_unchecked(vec) }
     }
 
     /// Converts a [`Vec`] to a [`StackVec`] without checking the length.
     ///
-    /// This function copies data from the Vec into the StackVec,
-    /// then clears the Vec.
+    /// This function copies data from the `Vec` into the `StackVec`,
+    /// then clears the `Vec`.
     ///
     /// # Safety
-    /// The Vec's length must be less than or equal to `N` (the StackVec's capacity).
+    /// length <= capacity `N`.
     #[inline(always)]
     pub unsafe fn from_vec_unchecked(vec: &mut Vec<T>) -> Self {
-        let mut res = Self::new();
-        res.len = vec.len();
-
         unsafe {
-            ptr::copy_nonoverlapping(vec.as_ptr(), res.as_mut_ptr(), res.len);
+            let res = Self::copy_from_raw(vec.as_ptr(), vec.len());
             vec.set_len(0);
+            res
         }
-
-        res
     }
 
     /// Converts a [`StackVec`] to a [`Vec`].
     ///
-    /// Allocates exactly `len` elements and transfers the data to the heap.
+    /// Allocates exactly `len` capacity and transfers the data to the heap.
     ///
     /// # Examples
     ///
@@ -369,7 +395,7 @@ impl<T, const N: usize> StackVec<T, N> {
         vec
     }
 
-    /// Converts a [`StackVec`] into a [`Box<[T]>`].
+    /// Converts a [`StackVec`] into a [`Box<[T]>`](Box).
     #[inline]
     pub fn into_boxed_slice(&mut self) -> Box<[T]> {
         self.into_vec().into_boxed_slice()
@@ -397,7 +423,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// # Safety
     /// The caller must ensure `len <= capacity`.
     #[inline(always)]
-    pub unsafe fn into_vec_with_capacity_unchecked(&mut self, capacity: usize) -> Vec<T> {
+    pub(crate) unsafe fn into_vec_with_capacity_unchecked(&mut self, capacity: usize) -> Vec<T> {
         let mut vec: Vec<T> = Vec::with_capacity(capacity);
 
         unsafe {
@@ -427,28 +453,39 @@ impl<T, const N: usize> StackVec<T, N> {
     /// vec.push(2);
     /// assert_eq!(vec.len(), 2);
     /// ```
-    #[inline]
+    #[inline(always)]
     pub const fn push(&mut self, value: T) {
         let len = self.len;
-        assert!(len < N, "Insufficient capacity.");
+        assert!(len < N, "length overflow during `push`");
 
-        unsafe {
-            ptr::write(self.as_mut_ptr().add(len), value);
-            self.len = len + 1;
+        if T::IS_ZST {
+            mem::forget(value);
+        } else {
+            unsafe {
+                ptr::write(self.as_mut_ptr().add(len), value);
+            }
         }
+
+        self.len = len + 1;
     }
 
     /// Appends an element to the back of the vector without bounds checking.
     ///
     /// # Safety
-    /// The vector must not be full: `self.len() < N`.
+    /// length < capacity `N` (before `push`)
     #[inline(always)]
     pub const unsafe fn push_unchecked(&mut self, value: T) {
-        unsafe {
-            core::hint::assert_unchecked(self.len < self.capacity());
-            ptr::write(self.as_mut_ptr().add(self.len), value);
+        let len: usize = self.len;
+
+        if T::IS_ZST {
+            mem::forget(value);
+        } else {
+            unsafe {
+                ptr::write(self.as_mut_ptr().add(len), value);
+            }
         }
-        self.len += 1;
+
+        self.len = len + 1;
     }
 
     /// Removes an item from the end of the vector and returns it, or `None` if empty.
@@ -468,16 +505,21 @@ impl<T, const N: usize> StackVec<T, N> {
     /// assert_eq!(vec.len(), 0);
     /// assert_eq!(vec.pop(), None);
     /// ```
-    #[inline]
+    #[inline(always)]
     pub const fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
-            crate::utils::cold_path();
+            cold_path();
             None
         } else {
             unsafe {
                 self.len -= 1;
+                // This hint is provided to the caller of the `pop`, not the `pop` itself.
                 core::hint::assert_unchecked(self.len < self.capacity());
-                Some(ptr::read(self.as_ptr().add(self.len)))
+                if T::IS_ZST {
+                    Some(ptr::read(ptr::dangling::<T>()))
+                } else {
+                    Some(ptr::read(self.as_ptr().add(self.len)))
+                }
             }
         }
     }
@@ -491,7 +533,6 @@ impl<T, const N: usize> StackVec<T, N> {
     /// # use fastvec::{stackvec, StackVec};
     /// let mut vec: StackVec<_, 5> = stackvec![1, 2, 3, 4];
     /// let pred = |x: &mut i32| *x % 2 == 0;
-    ///
     /// assert_eq!(vec.pop_if(pred), Some(4));
     /// assert_eq!(vec, [1, 2, 3]);
     /// assert_eq!(vec.pop_if(pred), None);
@@ -499,12 +540,15 @@ impl<T, const N: usize> StackVec<T, N> {
     #[inline]
     pub fn pop_if(&mut self, predicate: impl FnOnce(&mut T) -> bool) -> Option<T> {
         if self.len == 0 {
-            crate::utils::cold_path();
+            cold_path();
             None
         } else {
             unsafe {
-                core::hint::assert_unchecked(self.len > 0);
-                let ptr = self.as_mut_ptr().add(self.len - 1);
+                let ptr = if T::IS_ZST {
+                    ptr::dangling_mut::<T>()
+                } else {
+                    self.as_mut_ptr().add(self.len - 1)
+                };
                 if predicate(&mut *ptr) {
                     self.len -= 1;
                     Some(ptr::read(ptr))
@@ -519,7 +563,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// elements after it to the right.
     ///
     /// # Panics
-    /// Panics if `index > self.len()` or `index >= N`.
+    /// Panics if `index > len`.
     ///
     /// # Examples
     ///
@@ -534,37 +578,34 @@ impl<T, const N: usize> StackVec<T, N> {
     /// ```
     #[inline]
     pub const fn insert(&mut self, index: usize, element: T) {
-        assert!(
-            index <= self.len && index < N,
-            "insertion index should be <= len and < N"
-        );
+        assert!(index <= self.len, "insertion index should be <= len");
 
         unsafe {
-            let ptr = self.as_mut_ptr().add(index);
-            if index < self.len {
-                ptr::copy(ptr, ptr.add(1), self.len - index);
-            }
-            ptr::write(ptr, element);
-            self.len += 1;
+            self.insert_unchecked(index, element);
         }
     }
 
     /// Inserts an element at position `index` within the vector, without bounds checking.
     ///
     /// # Safety
-    /// - len < capacity (before insert)
-    /// - index <= len
+    /// - index <= len (before insertion)
     #[inline(always)]
-    pub unsafe fn insert_unchecked(&mut self, index: usize, element: T) {
-        // assert!(index <= N, "insertion index should be <= len");
-        unsafe {
-            let ptr = self.as_mut_ptr().add(index);
-            if index < self.len {
-                ptr::copy(ptr, ptr.add(1), self.len - index);
+    pub(crate) const unsafe fn insert_unchecked(&mut self, index: usize, element: T) {
+        debug_assert!(index <= self.len, "insertion index should be <= len");
+
+        if T::IS_ZST {
+            mem::forget(element);
+        } else {
+            unsafe {
+                let ptr = self.as_mut_ptr().add(index);
+                if index < self.len {
+                    ptr::copy(ptr, ptr.add(1), self.len - index);
+                }
+                ptr::write(ptr, element);
             }
-            ptr::write(ptr, element);
-            self.len += 1;
         }
+
+        self.len += 1;
     }
 
     /// Removes an element from the vector and returns it.
@@ -593,9 +634,16 @@ impl<T, const N: usize> StackVec<T, N> {
         assert!(index < self.len, "removal index should be < len");
 
         unsafe {
-            let base_ptr = self.as_mut_ptr();
-            let value = ptr::read(base_ptr.add(index));
-            ptr::copy(base_ptr.add(self.len - 1), base_ptr.add(index), 1);
+            let value;
+
+            if T::IS_ZST {
+                value = ptr::read(ptr::dangling::<T>());
+            } else {
+                let base_ptr = self.as_mut_ptr();
+                value = ptr::read(base_ptr.add(index));
+                ptr::copy(base_ptr.add(self.len - 1), base_ptr.add(index), 1);
+            }
+
             self.len -= 1;
             value
         }
@@ -626,11 +674,18 @@ impl<T, const N: usize> StackVec<T, N> {
         assert!(index < self.len, "removal index should be < len");
 
         unsafe {
-            let ptr = self.as_mut_ptr().add(index);
-            let ret = ptr::read(ptr);
-            ptr::copy(ptr.add(1), ptr, self.len - index - 1);
+            let value;
+
+            if T::IS_ZST {
+                value = ptr::read(ptr::dangling::<T>());
+            } else {
+                let ptr = self.as_mut_ptr().add(index);
+                value = ptr::read(ptr);
+                ptr::copy(ptr.add(1), ptr, self.len - index - 1);
+            }
+
             self.len -= 1;
-            ret
+            value
         }
     }
 
@@ -713,23 +768,9 @@ impl<T, const N: usize> StackVec<T, N> {
     /// assert_eq!(vec.len(), 2);
     /// assert_eq!(vec.pop(), Some(4));
     /// ```
+    #[inline]
     pub fn retain<F: FnMut(&T) -> bool>(&mut self, mut f: F) {
-        let mut count = 0usize;
-        let mut index = 0usize;
-        let base_ptr = self.as_mut_ptr();
-        while index < self.len {
-            unsafe {
-                let dst = base_ptr.add(index);
-                if f(&*dst) {
-                    ptr::copy(dst, base_ptr.add(count), 1);
-                    count += 1;
-                } else {
-                    ptr::drop_in_place(dst);
-                }
-            }
-            index += 1;
-        }
-        self.len = count;
+        self.retain_mut(|v| f(v));
     }
 
     /// Retains only the elements specified by the predicate, passing a mutable reference to it.
@@ -755,9 +796,8 @@ impl<T, const N: usize> StackVec<T, N> {
     /// ```
     pub fn retain_mut<F: FnMut(&mut T) -> bool>(&mut self, mut f: F) {
         let mut count = 0usize;
-        let mut index = 0usize;
         let base_ptr = self.as_mut_ptr();
-        while index < self.len {
+        for index in 0..self.len {
             unsafe {
                 let dst = base_ptr.add(index);
                 if f(&mut *dst) {
@@ -767,7 +807,6 @@ impl<T, const N: usize> StackVec<T, N> {
                     ptr::drop_in_place(dst);
                 }
             }
-            index += 1;
         }
         self.len = count;
     }
@@ -856,21 +895,29 @@ impl<T, const N: usize> StackVec<T, N> {
     /// assert_eq!(vec1, [1, 2, 3, 4, 5, 6]);
     /// assert_eq!(vec2, []);
     /// ```
+    #[inline]
     pub fn append<const P: usize>(&mut self, other: &mut StackVec<T, P>) {
         let other_len = other.len();
-        assert!(
-            self.len + other_len <= N,
-            "Insufficient capacity during append."
-        );
+        let self_len = self.len;
+        assert!(self_len + other_len <= N, "length overflow during `append`");
 
-        unsafe {
-            ptr::copy_nonoverlapping(other.as_ptr(), self.as_mut_ptr().add(self.len), other_len);
+        if !T::IS_ZST {
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    other.as_ptr(),
+                    self.as_mut_ptr().add(self_len),
+                    other_len,
+                );
+            }
         }
-        self.len += other_len;
+
+        self.len = self_len + other_len;
         other.len = 0;
     }
 
     /// Moves all the elements of [`Vec`] into `self`, leaving the source empty.
+    ///
+    /// Because the type and quantity are known, this will be more efficient than [`Extend`].
     ///
     /// # Panics
     ///
@@ -885,22 +932,31 @@ impl<T, const N: usize> StackVec<T, N> {
     /// assert_eq!(vec1, [1, 2, 3, 4, 5, 6]);
     /// assert_eq!(vec2, []);
     /// ```
+    #[inline]
     pub fn append_vec(&mut self, other: &mut Vec<T>) {
         let other_len = other.len();
+        let self_len = self.len;
+        assert!(self_len + other_len <= N, "length overflow during `append`");
 
-        assert!(
-            self.len + other_len <= N,
-            "Insufficient capacity during append."
-        );
+        if !T::IS_ZST {
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    other.as_ptr(),
+                    self.as_mut_ptr().add(self_len),
+                    other_len,
+                );
+            }
+        }
 
         unsafe {
-            ptr::copy_nonoverlapping(other.as_ptr(), self.as_mut_ptr().add(self.len), other_len);
-            self.len += other_len;
+            self.len = self_len + other_len;
             other.set_len(0);
         }
     }
 
     /// Moves all the elements of `self` into the given [`Vec`], leaving `self` empty.
+    ///
+    /// Because the type and quantity are known, this will be more efficient than [`Extend`].
     ///
     /// # Examples
     /// ```
@@ -911,13 +967,25 @@ impl<T, const N: usize> StackVec<T, N> {
     /// assert_eq!(vec1, [1, 2, 3, 4, 5, 6]);
     /// assert_eq!(vec2, []);
     /// ```
+    #[inline]
     pub fn append_to_vec(&mut self, other: &mut Vec<T>) {
-        other.reserve(self.len);
         let other_len = other.len();
+        let self_len = self.len;
+
+        other.reserve(self_len);
+
+        if !T::IS_ZST {
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    self.as_ptr(),
+                    other.as_mut_ptr().add(other_len),
+                    self_len,
+                );
+            }
+        }
 
         unsafe {
-            ptr::copy_nonoverlapping(self.as_ptr(), other.as_mut_ptr().add(other_len), self.len);
-            other.set_len(other_len + self.len);
+            other.set_len(other_len + self_len);
             self.len = 0;
         }
     }
@@ -943,22 +1011,6 @@ impl<T, const N: usize> StackVec<T, N> {
         }
     }
 
-    /// Returns true if the vector contains no elements.
-    ///
-    /// # Examples
-    /// ```
-    /// # use fastvec::{StackVec, stackvec};
-    /// let mut v = StackVec::<i32, 5>::new();
-    /// assert!(v.is_empty());
-    ///
-    /// v.push(1);
-    /// assert!(!v.is_empty());
-    /// ```
-    #[inline(always)]
-    pub const fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
     /// Splits the collection into two at the given index.
     ///
     /// # Panics
@@ -982,7 +1034,9 @@ impl<T, const N: usize> StackVec<T, N> {
             other.len = self.len - at;
             self.len = at;
 
-            ptr::copy_nonoverlapping(self.as_ptr().add(at), other.as_mut_ptr(), other.len);
+            if !T::IS_ZST {
+                ptr::copy_nonoverlapping(self.as_ptr().add(at), other.as_mut_ptr(), other.len);
+            }
         }
         other
     }
@@ -1004,7 +1058,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// assert_eq!(vec, [1, 2, 2, 4, 8]);
     /// ```
     pub fn resize_with<F: FnMut() -> T>(&mut self, new_len: usize, mut f: F) {
-        assert!(new_len <= N, "the length should be <= capacity");
+        assert!(new_len <= N, "length overflow during `resize_with`");
 
         if new_len < self.len {
             self.truncate(new_len);
@@ -1043,14 +1097,14 @@ impl<T, const N: usize> StackVec<T, N> {
     ///
     /// assert_eq!(v, [0, 1, 2]);
     /// ```
-    #[inline]
+    #[inline(always)]
     pub const fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
         &mut self.data
     }
 }
 
 impl<T: Clone, const N: usize> StackVec<T, N> {
-    /// Creates a StackVec with `num` copies of `elem`.
+    /// Creates a [`StackVec`] with `num` copies of `elem`.
     ///
     /// This function requires `T` to implement `Clone`.
     ///
@@ -1065,21 +1119,17 @@ impl<T: Clone, const N: usize> StackVec<T, N> {
     /// ```
     #[inline]
     pub fn from_elem(elem: T, num: usize) -> Self {
-        assert!(num <= N, "the length should be <= capacity");
+        assert!(num <= N, "length overflow during `from_elem`");
 
         let mut vec = Self::new();
-        let base_ptr = vec.as_mut_ptr();
 
-        let mut cnt = 1;
-        while cnt < num {
-            unsafe {
-                ptr::write(base_ptr.add(cnt), elem.clone());
-            }
-            cnt += 1;
-        }
         if num != 0 {
-            // Reduce one copy.
+            let base_ptr = vec.as_mut_ptr();
             unsafe {
+                for index in 1..num {
+                    ptr::write(base_ptr.add(index), elem.clone());
+                }
+                // Reduce one copy.
                 ptr::write(base_ptr, elem);
             }
         }
@@ -1088,11 +1138,11 @@ impl<T: Clone, const N: usize> StackVec<T, N> {
         vec
     }
 
-    /// Resizes the StackVec in-place so that len is equal to new_len.
+    /// Resizes the [`StackVec`] in-place so that len is equal to `new_len`.
     ///
     /// # Panics
     ///
-    /// Panics if the new capacity exceeds `N`.
+    /// Panics if `new_len` > capacity `N`.
     ///
     /// # Examples
     ///
@@ -1107,7 +1157,7 @@ impl<T: Clone, const N: usize> StackVec<T, N> {
     /// assert_eq!(vec, ['a', 'b']);
     /// ```
     pub fn resize(&mut self, new_len: usize, value: T) {
-        assert!(new_len <= N, "the length should be <= capacity");
+        assert!(new_len <= N, "length overflow during `resize`");
 
         if new_len < self.len {
             self.truncate(new_len);
@@ -1245,6 +1295,18 @@ impl<T, const N: usize> Default for StackVec<T, N> {
 }
 
 impl<T: Clone, const N: usize> Clone for StackVec<T, N> {
+    /// See [`Clone::clone`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{StackVec, stackvec};
+    /// let vec: StackVec<i32, 5> = stackvec![1, 2 , 3];
+    ///
+    /// let vec2 = vec.clone();
+    /// assert_eq!(vec, [1, 2 , 3]);
+    /// assert_eq!(vec, vec2);
+    /// ```
     fn clone(&self) -> Self {
         let mut vec = Self::new();
         for item in self.as_slice() {
@@ -1253,6 +1315,19 @@ impl<T: Clone, const N: usize> Clone for StackVec<T, N> {
         vec
     }
 
+    /// See [`Clone::clone_from`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{StackVec, stackvec};
+    /// let vec: StackVec<i32, 5> = stackvec![1, 2 , 3];
+    ///
+    /// let mut vec2 = stackvec![];
+    /// vec2.clone_from(&vec);
+    /// assert_eq!(vec, [1, 2 , 3]);
+    /// assert_eq!(vec, vec2);
+    /// ```
     fn clone_from(&mut self, source: &Self) {
         self.clear();
         for item in source.as_slice() {
@@ -1266,6 +1341,16 @@ impl<'a, T: 'a + Clone, const N: usize> Extend<&'a T> for StackVec<T, N> {
     ///
     /// # Panics
     /// Insufficient capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{StackVec, stackvec};
+    /// let mut vec: StackVec<i32, 5> = stackvec![];
+    ///
+    /// vec.extend(&[1, 2, 3]);
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
         for item in iter {
             self.push(item.clone());
@@ -1278,6 +1363,16 @@ impl<T, const N: usize> Extend<T> for StackVec<T, N> {
     ///
     /// # Panics
     /// Insufficient capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{StackVec, stackvec};
+    /// let mut vec: StackVec<i32, 5> = stackvec![];
+    ///
+    /// vec.extend([1, 2, 3]);
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
     #[inline]
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for item in iter {
@@ -1311,8 +1406,19 @@ impl<'a, T: Clone, const N: usize> From<StackVec<T, N>> for alloc::borrow::Cow<'
 }
 
 impl<T: Clone, const N: usize> From<&[T]> for StackVec<T, N> {
+    /// # Panics
+    /// Insufficient capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::StackVec;
+    /// let mut vec = <StackVec<i32, 3>>::from([1, 2, 3].as_slice());
+    ///
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
     fn from(value: &[T]) -> Self {
-        assert!(value.len() <= N, "the length should be <= capacity");
+        assert!(value.len() <= N, "length overflow when `from`");
         let mut vec = Self::new();
         for items in value {
             unsafe {
@@ -1324,8 +1430,19 @@ impl<T: Clone, const N: usize> From<&[T]> for StackVec<T, N> {
 }
 
 impl<T: Clone, const N: usize, const P: usize> From<&[T; P]> for StackVec<T, N> {
+    /// # Panics
+    /// Insufficient capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::StackVec;
+    /// let mut vec = <StackVec<i32, 3>>::from(&[1, 2, 3]);
+    ///
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
     fn from(value: &[T; P]) -> Self {
-        assert!(P <= N, "the length should be <= capacity");
+        assert!(P <= N, "length overflow when `from`");
         let mut vec = Self::new();
         for items in value {
             unsafe {
@@ -1351,34 +1468,124 @@ impl<T: Clone, const N: usize, const P: usize> From<&mut [T; P]> for StackVec<T,
 }
 
 impl<T, const N: usize, const P: usize> From<[T; P]> for StackVec<T, N> {
+    /// # Panics
+    /// Insufficient capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::StackVec;
+    /// let mut vec = <StackVec<i32, 3>>::from([1, 2, 3]);
+    ///
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
     fn from(value: [T; P]) -> Self {
-        assert!(P <= N, "the length should be <= capacity");
+        assert!(P <= N, "length overflow when `from`");
         let mut vec = Self::new();
-        for items in value {
-            unsafe {
-                vec.push_unchecked(items);
-            }
+        unsafe {
+            ptr::copy_nonoverlapping(value.as_ptr(), vec.as_mut_ptr(), P);
+            vec.len = P;
+            mem::forget(value);
         }
         vec
     }
 }
 
 impl<T, const N: usize> From<Box<[T]>> for StackVec<T, N> {
+    /// # Panics
+    /// Insufficient capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::StackVec;
+    /// let mut vec = <StackVec<i32, 3>>::from(vec![1, 2, 3].into_boxed_slice());
+    ///
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
+    #[inline]
     fn from(value: Box<[T]>) -> Self {
-        assert!(value.len() <= N, "the length should be <= capacity");
-        let mut vec = Self::new();
-        for items in value {
-            unsafe {
-                vec.push_unchecked(items);
-            }
+        Self::from(value.into_vec())
+    }
+}
+
+impl<T, const N: usize> From<Vec<T>> for StackVec<T, N> {
+    /// # Panics
+    /// Insufficient capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::StackVec;
+    /// let mut vec = <StackVec<i32, 3>>::from(vec![1, 2, 3]);
+    ///
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
+    fn from(mut value: Vec<T>) -> Self {
+        assert!(value.len() <= N, "length overflow when `from`");
+        unsafe { Self::from_vec_unchecked(&mut value) }
+    }
+}
+
+impl<T, const N: usize, const P: usize> From<crate::FastVec<T, P>> for StackVec<T, N> {
+    /// # Panics
+    /// Insufficient capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{StackVec, FastVec};
+    /// let mut vec = <StackVec<i32, 3>>::from(
+    ///     FastVec::<i32>::from([1, 2, 3])
+    /// );
+    ///
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
+    fn from(mut value: crate::FastVec<T, P>) -> Self {
+        let len = value.len();
+        assert!(len <= N, "length overflow when `from`");
+        let vec = value.get();
+        vec.len = 0;
+        unsafe { Self::copy_from_raw(vec.as_ptr(), len) }
+    }
+}
+
+impl<T, const N: usize, const P: usize> From<crate::AutoVec<T, P>> for StackVec<T, N> {
+    /// # Panics
+    /// Insufficient capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::{StackVec, AutoVec};
+    /// let mut vec = <StackVec<i32, 3>>::from(
+    ///     AutoVec::<i32, 3>::from([1, 2, 3])
+    /// );
+    ///
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
+    fn from(mut value: crate::AutoVec<T, P>) -> Self {
+        let len = value.len();
+        assert!(len <= N, "length overflow when `from`");
+        unsafe {
+            value.set_len(0);
+            Self::copy_from_raw(value.as_ptr(), len)
         }
-        vec
     }
 }
 
 impl<T, const N: usize> FromIterator<T> for StackVec<T, N> {
     /// # Panics
     /// Insufficient capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::StackVec;
+    /// let mut vec = <StackVec<i32, 3>>::from_iter([1, 2, 3].into_iter());
+    ///
+    /// assert_eq!(vec, [1, 2, 3]);
+    /// ```
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut vec = Self::new();
         for item in iter {
@@ -1431,7 +1638,11 @@ impl<T, const N: usize> Iterator for IntoIter<T, N> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.vec.len {
             self.index += 1;
-            unsafe { Some(ptr::read(self.vec.as_ptr().add(self.index - 1))) }
+            if T::IS_ZST {
+                unsafe { Some(ptr::read(ptr::dangling::<T>())) }
+            } else {
+                unsafe { Some(ptr::read(self.vec.as_ptr().add(self.index - 1))) }
+            }
         } else {
             None
         }
@@ -1449,7 +1660,11 @@ impl<T, const N: usize> DoubleEndedIterator for IntoIter<T, N> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.index < self.vec.len {
             self.vec.len -= 1;
-            unsafe { Some(ptr::read(self.vec.as_ptr().add(self.vec.len))) }
+            if T::IS_ZST {
+                unsafe { Some(ptr::read(ptr::dangling::<T>())) }
+            } else {
+                unsafe { Some(ptr::read(self.vec.as_ptr().add(self.vec.len))) }
+            }
         } else {
             None
         }

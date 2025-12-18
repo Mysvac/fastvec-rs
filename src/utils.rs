@@ -7,6 +7,19 @@ pub(crate) use core::hint::cold_path;
 #[inline(always)]
 pub(crate) const fn cold_path() {}
 
+pub(crate) trait IsZST {
+    const IS_ZST: bool;
+}
+
+impl<T> IsZST for T {
+    /// A flag used to indicate the ZST (zero sized type).
+    ///
+    /// This will be optimized by the compiler and will not take up additional space.
+    ///
+    /// Don't worry about the additional overhead of branching statements.
+    const IS_ZST: bool = core::mem::size_of::<T>() == 0;
+}
+
 /// choose min non-zero capacity for type T
 #[inline(always)]
 pub(crate) const fn min_cap<T>() -> usize {

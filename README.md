@@ -1,106 +1,116 @@
-# FastVec: Fast, Stack-Optimized Vectors
+# FastVec: Stack-Optimized High-Speed Vector
 
-A high-performance vector library optimized for small collections. Data is stored on the stack
-initially and automatically migrates to the heap only when capacity is exceeded.
-
-> See more infomation in [`Document`](https://docs.rs/fastvec/latest/fastvec/) and [`crate.io`](https://crates.io/crates/fastvec) .
-
-## Why Stack Allocation?
-
-Many real-world workloads operate on small collections that fit comfortably in a fixed-size
-stack buffer, but occasionally need to grow larger. Stack allocation is significantly faster
-than heap allocation due to:
-- **Zero allocator overhead**: No malloc/free calls for small data
-- **Better cache locality**: Stack data stays in L1/L2 cache
-- **Predictable performance**: No allocation latency spikes
-
-## The FastVec Approach
-
-Unlike [`SmallVec`](https://docs.rs/smallvec/latest/smallvec), which combines both behaviors
-in a single container, FastVec uses a **two-container strategy**:
-- **`StackVec`**: For fixed-size stacks (zero overhead, maximum performance)
-- **`FastVec`**: For flexible growth (stack-to-heap migration with pointer caching)
-
-This design achieves **higher efficiency** by eliminating runtime checks in the hot path.
-See [benchmark results](https://github.com/Mysvac/fastvec-rs/blob/main/benches/README.md) for detailed comparisons.
+A high-performance vector crate tuned for small data sizes. It favors stack storage to reduce heap allocations and improve cache hit rates.
 
 ## Container Guide
 
-| Container | Storage | Growth | Use Case |
-|-----------|---------|--------|----------|
-| **`StackVec`** | Stack only (fixed) | Fixed capacity | Size is known and bounded |
-| **`FastVec`** | Stack → Heap (dynamic) | Automatic | Size uncertain but usually small |
+We provide three containers for different scenarios:
 
-### `StackVec`: The High-Performance Container
+| Container | Storage | Best for |
+| **StackVec** | Stack-only, fixed capacity | When you need peak performance and know the max element count |
+| **FastVec** | Stack first, auto-switch to heap | When you need peak performance for temporary data |
+| **AutoVec** | Stack first, auto-switch to heap | When you need long-term storage with an unknown but typically small element count |
 
-A vector with fixed capacity backed entirely by the stack.
+If you have many elements and need long-term storage, consider using `Vec` directly.
+
+### StackVec
+
+A stack-resident `Vec` that allocates space without initializing data.
 
 **Features:**
-- ✓ Fixed capacity (compile-time configurable)
-- ✓ Zero heap allocations
-- ✓ Array-like performance
-- ✓ Vec-like interface
-- ✗ Panics if capacity is exceeded
+- No heap allocations
+- Extreme array-like performance
+- `Vec`-compatible API
+- Compile-time fixed capacity, cannot grow
 
-**Best for:** Known, bounded collection sizes (e.g., small buffers, fixed arrays).
+A great replacement for a plain array `[T; N]`.
 
 ```rust
 let mut vec: StackVec<i32, 10> = StackVec::new();
+
 vec.push(1);
 vec.push(2);
+
+assert_eq!(vec, [1, 2]);
 assert_eq!(vec.len(), 2);
 assert_eq!(vec.capacity(), 10); // Fixed capacity
 ```
 
-### `FastVec`: The Flexible Container
+Supports nearly all `Vec` operations (except reallocation).
 
-A vector that starts with stack storage and transparently migrates to the heap when needed.
+See the `StackVec` docs for details.
+
+### FastVec
+
+A `Vec` for temporary data that auto-grows. It prefers the stack and switches to the heap when capacity is insufficient.
 
 **Features:**
-- ✓ Stack storage for small collections (default: 8 elements)
-- ✓ Automatic heap migration when needed
-- ✓ Never panics from capacity limits
-- ✓ Vec-like interface
-- ✓ Pointer caching for efficiency (eliminates runtime checks)
+- `!Sync`, generally for temporary data processing
+- Supports capacity growth
+- Stack-first; no heap allocs for small sizes
+- Guaranteed not slower than `Vec` for large sizes
 
-**Best for:** Uncertain collection sizes that are usually small (e.g., parsed data, result collections).
+This container caches pointers to minimize stack/heap checks, keeping performance from degrading (even on the heap it’s no slower than `Vec`) and outperforming `SmallVec`.
 
 ```rust
-// Default stack capacity is 8
-let mut vec: FastVec<_> = fastvec![1, 2, 3];
-assert!(vec.in_cache()); // Still on stack
-
-// Customize stack capacity
 let mut vec: FastVec<i32, 5> = fastvec![1, 2, 3];
+assert_eq!(vec.capacity(), 5);
 
-// Grow beyond stack capacity → automatically migrates to heap
-vec.get_mut().extend([4, 5, 6, 7, 8]);
-assert!(!vec.in_cache()); // Now on heap
+// Auto-grows; switches to heap when needed
+vec.get().extend([4, 5, 6, 7, 8]);
+assert!(!vec.in_stack()); // Now on heap
+assert_eq!(vec, [1, 2, 3, 4, 5, 6, 7, 8])
 ```
 
-Unlike `SmallVec`, `FastVec` caches a pointer to the current data,
-eliminating the conditional check ("is this on stack or heap?") from the critical path.
+Pointer caching introduces self-references, so it is `!Sync`. Any data access must first call `get` to obtain the correct `FastVecData` reference.
 
-This results in measurably faster operations on small collections, but requires explicit
-access through `get_ref` or `get_mut` for certain
-operations. See the `FastVec` documentation for details on the API trade-offs and usage patterns.
+`get` incurs one branch and pointer assignment; typically you should grab the data reference once, use it via references, and only switch when you need to move the data.
 
-## `no_std` Support
+See the `FastVec` docs for details.
 
-FastVec requires only `core` and `alloc`, making it ideal for embedded systems and no_std environments.
-Full freestanding Rust support is included by default.
+### AutoVec
+
+A small-data-optimized `Vec` for long-term storage, implemented as an enum of `Vec` and `StackVec`.
+
+**Features:**
+- `Sync + Send`, suitable for long-term storage
+- Supports capacity growth
+- Stack-first; no heap allocs for small sizes
+- `Vec`-compatible API
+
+Unlike `FastVec`, this container checks stack/heap location on operations and is designed similarly to `SmallVec`. It is efficient for small data but may lag `Vec` on large data, especially on simple functions like `push/pop`.
+
+```rust
+let mut vec: AutoVec<i32, 5> = autovec![1, 2, 3];
+assert_eq!(vec.capacity(), 5);
+
+// Auto-grows; switches to heap when needed
+vec.extend([4, 5, 6, 7, 8]);
+assert!(!vec.in_stack()); // Now on heap
+assert_eq!(vec, [1, 2, 3, 4, 5, 6, 7, 8])
+```
+
+Supports all `Vec` operations without needing `get_xxx`.
+
+See the `AutoVec` docs for details.
+
+## no_std Support
+
+FastVec depends only on `core` and `alloc`, making it ideal for embedded and no_std environments.
 
 ## Optional Features
 
-### `serde`
+### serde
 
-When enabled, both `StackVec` and `FastVec` implement:
-- [`serde::Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html)
-- [`serde::Deserialize`](https://docs.rs/serde/latest/serde/trait.Deserialize.html)
+When enabled, `StackVec`, `FastVec` and `AutoVec` implement
+`serde::Serialize` and `serde::Deserialize` .
 
-### `nightly`
+### std
 
-Only available in Nightly version.
+When enabled, `StackVec`, `FastVec` and `AutoVec` implement `std::io::Write` .
 
-This will enable the `cold_path` feature, further
-optimizing the `push`, `pop`, `insert` performance of `FastVec`.
+### nightly
+
+Available only on Nightly.
+
+When enabled, the `cold_path` feature is used to optimize branch prediction.
