@@ -1,12 +1,15 @@
 # FastVec: Stack-Optimized High-Speed Vector
 
-A high-performance vector crate tuned for small data sizes. It favors stack storage to reduce heap allocations and improve cache hit rates.
+A high-performance vector crate tuned for small data sizes.
+
+Favors stack-backed storage to reduce heap allocations and improve CPU cache locality.
 
 ## Container Guide
 
 We provide three containers for different scenarios:
 
 | Container | Storage | Best for |
+|-----------|---------|----------|
 | **StackVec** | Stack-only, fixed capacity | When you need peak performance and know the max element count |
 | **FastVec** | Stack first, auto-switch to heap | When you need peak performance for temporary data |
 | **AutoVec** | Stack first, auto-switch to heap | When you need long-term storage with an unknown but typically small element count |
@@ -20,7 +23,7 @@ A stack-resident `Vec` that allocates space without initializing data.
 **Features:**
 - No heap allocations
 - Extreme array-like performance
-- `Vec`-compatible API
+- Vec-compatible API
 - Compile-time fixed capacity, cannot grow
 
 A great replacement for a plain array `[T; N]`.
@@ -76,9 +79,12 @@ A small-data-optimized `Vec` for long-term storage, implemented as an enum of `V
 - `Sync + Send`, suitable for long-term storage
 - Supports capacity growth
 - Stack-first; no heap allocs for small sizes
-- `Vec`-compatible API
+- Vec-compatible API
 
-Unlike `FastVec`, this container checks stack/heap location on operations and is designed similarly to `SmallVec`. It is efficient for small data but may lag `Vec` on large data, especially on simple functions like `push/pop`.
+Unlike `FastVec`, this container checks stack/heap location on operations
+and is designed similarly to [`SmallVec`](https://docs.rs/smallvec/latest/smallvec).
+It is efficient for small data but may lag `Vec` on large data,
+especially on simple functions like `push/pop`.
 
 ```rust
 let mut vec: AutoVec<i32, 5> = autovec![1, 2, 3];
@@ -90,7 +96,7 @@ assert!(!vec.in_stack()); // Now on heap
 assert_eq!(vec, [1, 2, 3, 4, 5, 6, 7, 8])
 ```
 
-Supports all `Vec` operations without needing `get_xxx`.
+Supports all `Vec` operations without needing `get`.
 
 See the `AutoVec` docs for details.
 

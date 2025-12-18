@@ -14,7 +14,7 @@ pub(crate) enum InnerVec<T, const N: usize> {
 /// This type is useful when you are unsure of the length of the data but know that the amount of data is small.
 /// At this point, using this container can avoid the overhead of heap requests.
 ///
-/// Most methods are similar to [alloc::vec::Vec] .
+/// Most methods are similar to [`alloc::vec::Vec`] .
 /// Internally, it is actually an enumeration that stores either [`StackVec`] or [`Vec`].
 ///
 /// Similar to `SmallVec`, this type is not suitable for scenarios with large amounts of data,
@@ -289,7 +289,7 @@ impl<T, const N: usize> AutoVec<T, N> {
                 InnerVec::Stack(_) => return,
                 InnerVec::Heap(vec) => {
                     if capacity > vec.capacity() {
-                        // SAFETY: capacity >= len
+                        // SAFETY: capacity >= len && capacity <= N
                         self.0 = InnerVec::Stack(unsafe { StackVec::from_vec_unchecked(vec) });
                     }
                 }
@@ -328,8 +328,8 @@ impl<T, const N: usize> AutoVec<T, N> {
             match &mut self.0 {
                 InnerVec::Stack(_) => return,
                 InnerVec::Heap(vec) => {
-                    if vec.capacity() != capacity {
-                        // SAFETY: Ensure that the capacity is greater than the length.
+                    if capacity > vec.capacity() {
+                        // SAFETY: capacity >= len && capacity <= N
                         self.0 = InnerVec::Stack(unsafe { StackVec::from_vec_unchecked(vec) });
                     }
                 }

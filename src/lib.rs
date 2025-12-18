@@ -1,24 +1,27 @@
-//! A high-performance vector crate tuned for small data sizes. It favors stack storage to reduce heap allocations and improve cache hit rates.
+//! A high-performance vector crate tuned for small data sizes.
+//!
+//! Favors stack-backed storage to reduce heap allocations and improve CPU cache locality.
 //!
 //! ## Container Guide
 //!
 //! We provide three containers for different scenarios:
 //!
 //! | Container | Storage | Best for |
+//! |-----------|---------|----------|
 //! | **[StackVec]** | Stack-only, fixed capacity | When you need peak performance and know the max element count |
 //! | **[FastVec]** | Stack first, auto-switch to heap | When you need peak performance for temporary data |
 //! | **[AutoVec]** | Stack first, auto-switch to heap | When you need long-term storage with an unknown but typically small element count |
 //!
 //! If you have many elements and need long-term storage, consider using [`Vec`](alloc::vec::Vec) directly.
 //!
-//! ### [`StackVec`]
+//! ### [StackVec]
 //!
 //! A stack-resident `Vec` that allocates space without initializing data.
 //!
 //! **Features:**
 //! - No heap allocations
 //! - Extreme array-like performance
-//! - `Vec`-compatible API
+//! - Vec-compatible API
 //! - Compile-time fixed capacity, cannot grow
 //!
 //! A great replacement for a plain array `[T; N]`.
@@ -40,7 +43,7 @@
 //!
 //! See the [`StackVec`] docs for details.
 //!
-//! ### [`FastVec`]
+//! ### [FastVec]
 //!
 //! A `Vec` for temporary data that auto-grows. It prefers the stack and switches to the heap when capacity is insufficient.
 //!
@@ -51,7 +54,7 @@
 //! - Guaranteed not slower than `Vec` for large sizes
 //!
 //! This container caches pointers to minimize stack/heap checks, keeping performance from degrading
-//! (even on the heap it’s no slower than `Vec`) and outperforming `SmallVec`.
+//! (even on the heap it’s no slower than `Vec`) and outperforming [`SmallVec`](https://docs.rs/smallvec/latest/smallvec).
 //!
 //! ```rust
 //! # use fastvec::{FastVec, fastvec};
@@ -71,7 +74,7 @@
 //!
 //! See the [`FastVec`] docs for details.
 //!
-//! ### [`AutoVec`]
+//! ### [AutoVec]
 //!
 //! A small-data-optimized `Vec` for long-term storage, implemented as an enum of `Vec` and `StackVec`.
 //!
@@ -79,9 +82,12 @@
 //! - `Sync + Send`, suitable for long-term storage
 //! - Supports capacity growth
 //! - Stack-first; no heap allocs for small sizes
-//! - `Vec`-compatible API
+//! - Vec-compatible API
 //!
-//! Unlike [`FastVec`], this container checks stack/heap location on operations and is designed similarly to `SmallVec`. It is efficient for small data but may lag `Vec` on large data, especially on simple functions like `push/pop`.
+//! Unlike [`FastVec`], this container checks stack/heap location on operations
+//! and is designed similarly to [`SmallVec`](https://docs.rs/smallvec/latest/smallvec).
+//! It is efficient for small data but may lag `Vec` on large data,
+//! especially on simple functions like `push/pop`.
 //!
 //! ```rust
 //! # use fastvec::{AutoVec, autovec};
@@ -94,7 +100,7 @@
 //! assert_eq!(vec, [1, 2, 3, 4, 5, 6, 7, 8])
 //! ```
 //!
-//! Supports all [`Vec`](alloc::vec::Vec) operations without needing `get_xxx`.
+//! Supports all [`Vec`](alloc::vec::Vec) operations without needing `get`.
 //!
 //! See the [`AutoVec`] docs for details.
 //!

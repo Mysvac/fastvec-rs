@@ -646,15 +646,16 @@ impl<T, const N: usize> FastVecData<T, N> {
 
     /// Converts the vector into [`Vec<T>`](Vec).
     ///
-    /// - If the data is in the stack (cache), then the created [`Vec`]'s capacity is accurate.
+    /// - If the data is in the stack, then the created [`Vec`]'s capacity is accurate.
     /// - If the data is in the heap, then transfer the pointer directly to ensure maximum efficiency.
     #[inline]
     pub(crate) fn into_vec(mut self) -> Vec<T> {
         if self.in_stack {
-            let mut vec: Vec<T> = Vec::with_capacity(self.len);
+            let len = self.len;
+            let mut vec: Vec<T> = Vec::with_capacity(len);
             unsafe {
-                ptr::copy_nonoverlapping(self.stack_ptr(), vec.as_mut_ptr(), self.len);
-                vec.set_len(self.len);
+                ptr::copy_nonoverlapping(self.stack_ptr(), vec.as_mut_ptr(), len);
+                vec.set_len(len);
             }
             self.len = 0;
             vec
@@ -668,24 +669,13 @@ impl<T, const N: usize> FastVecData<T, N> {
 
     /// Converts the vector into [`Vec<T>`](Vec).
     ///
-    /// - If the data is in the stack (cache), then the created [`Vec`]'s capacity is accurate.
+    /// - If the data is in the stack, then the created [`Vec`]'s capacity is accurate.
     /// - If the data is in the heap, then transfer the pointer and call [`Vec::shrink_to_fit`] .
     #[inline]
-    pub(crate) fn shrink_into_vec(mut self) -> Vec<T> {
-        if self.in_stack {
-            let mut vec: Vec<T> = Vec::with_capacity(self.len);
-            unsafe {
-                ptr::copy_nonoverlapping(self.stack_ptr(), vec.as_mut_ptr(), self.len);
-            }
-            self.len = 0;
-            vec
-        } else {
-            let mut vec = unsafe { Vec::from_raw_parts(self.as_mut_ptr(), self.len, self.cap) };
-            vec.shrink_to_fit();
-            self.len = 0;
-            self.in_stack = true;
-            vec
-        }
+    pub(crate) fn shrink_into_vec(self) -> Vec<T> {
+        let mut vec = self.into_vec();
+        vec.shrink_to_fit();
+        vec
     }
 
     /// Converts the vector into [`Box<[T]>`](Box).
@@ -1217,7 +1207,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// Panics if `at > len`.
     ///
     /// # Safety
-    /// - Using [`FastVec`] to host the returned [`FastVecData`],
+    /// - Using [`FastVec`](crate::FastVec) to host the returned [`FastVecData`],
     /// - or manually call [`FastVecData::refresh`] before any method call.
     ///
     /// # Examples
@@ -1319,7 +1309,12 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     #[inline]
     pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
-        unsafe { slice::from_raw_parts_mut(self.as_mut_ptr() as *mut MaybeUninit<T>, self.cap) }
+        unsafe {
+            slice::from_raw_parts_mut(
+                self.as_mut_ptr().add(self.len) as *mut MaybeUninit<T>,
+                self.cap - self.len,
+            )
+        }
     }
 }
 

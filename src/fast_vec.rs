@@ -189,7 +189,7 @@ use crate::utils::{IsZST, cold_path};
 /// Rust's borrow checker ensures [`FastVecData`] cannot be moved while borrowed, so the pointer
 /// remains valid during handle usage.
 ///
-/// ## Why [`Cell`]?
+/// ## Why [`Cell`](core::cell::Cell)?
 ///
 /// Pointer refresh needs interior mutability (even [`as_slice`](FastVec::as_slice) must update the pointer).
 ///
@@ -564,29 +564,47 @@ impl<T, const N: usize> FastVec<T, N> {
     /// - If the data is in the stack area, it needs to be copied.
     ///
     /// No data is lost.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::FastVec;
+    /// let vec: FastVec<i32, 3> = [1, 2].into();
+    /// let mut vec: FastVec<i32, 5> = vec.force_cast();
+    /// assert_eq!(vec, [1, 2]);
+    /// assert!(vec.in_stack());
+    ///
+    /// vec.get().extend([3, 4, 5, 6]);
+    /// assert!(!vec.in_stack());
+    ///
+    /// let vec: FastVec<i32, 8> = vec.force_cast();
+    /// assert_eq!(vec, [1, 2, 3, 4, 5, 6]);
+    /// assert!(!vec.in_stack());
+    /// ```
     pub fn force_cast<const P: usize>(mut self) -> FastVec<T, P> {
         if self.inner.in_stack {
+            let len = self.inner.len;
+            let mut state = <FastVec<T, P>>::with_capacity(len);
+            let dst = state.get();
+            let src = self.get();
+            unsafe {
+                if !T::IS_ZST {
+                    ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), len);
+                }
+                dst.len = len;
+                src.len = 0;
+            }
+            state
+        } else {
             unsafe {
                 let state = <FastVec<T, P>>::from_raw_parts(
                     self.get().as_mut_ptr(),
                     self.len(),
                     self.capacity(),
                 );
-                self.inner.len = 0;
+                mem::forget(self);
                 state
             }
-        } else {
-            let mut state = <FastVec<T, P>>::with_capacity(self.inner.len);
-            let dst = state.get();
-            let src = self.get();
-            unsafe {
-                if !T::IS_ZST {
-                    ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), src.len);
-                }
-                dst.len = src.len;
-                src.len = 0;
-            }
-            state
         }
     }
 

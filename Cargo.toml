@@ -1,6 +1,6 @@
 [package]
 name = "fastvec"
-version = "0.3.0"
+version = "1.0.0"
 edition = "2024"
 keywords = ["small", "vec", "stack", "no_std", "fastvec"]
 license = "MIT OR Apache-2.0"
@@ -9,7 +9,7 @@ documentation = "https://docs.rs/fastvec"
 repository = "https://github.com/Mysvac/fastvec-rs"
 description = "A vector crate that stores small data on the stack and automatically spills to the heap when needed."
 rust-version = "1.90.0"
-exclude = ["benches", ".github"]
+exclude = ["benchmark", ".github"]
 
 [features]
 

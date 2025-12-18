@@ -3,10 +3,10 @@ use core::{
     fmt,
     iter::FusedIterator,
     mem::{self, ManuallyDrop, MaybeUninit},
-    ptr,
+    ptr, slice,
 };
 
-use crate::utils::{IsZST, cold_path};
+use crate::utils::{IsZST, cold_path, zst_init};
 
 /// A vector stored on the stack with a fixed capacity.
 ///
@@ -74,7 +74,7 @@ impl<T, const N: usize> Drop for StackVec<T, N> {
 /// You must explicitly specify the container capacity.
 /// The number of elements cannot exceed the capacity.
 ///
-/// Non-params macro is eq to [`new`](`StackVec`).
+/// Non-params macro is equal to [`StackVec::new`].
 ///
 /// # Panics
 /// Panics if the number of elements exceeds the capacity.
@@ -199,7 +199,7 @@ impl<T, const N: usize> StackVec<T, N> {
         self.len
     }
 
-    /// Returns true if the vector contains no elements.
+    /// Returns `true` if the vector contains no elements.
     ///
     /// # Examples
     /// ```
@@ -215,7 +215,7 @@ impl<T, const N: usize> StackVec<T, N> {
         self.len == 0
     }
 
-    /// Returns true if `len == N` .
+    /// Returns `true` if `len == N` .
     ///
     /// # Examples
     /// ```
@@ -293,7 +293,7 @@ impl<T, const N: usize> StackVec<T, N> {
         vec
     }
 
-    /// Creates a StackVec from an array.
+    /// Creates a [`StackVec`] from an array.
     ///
     /// Copies elements from the provided array into the StackVec.
     ///
@@ -516,7 +516,7 @@ impl<T, const N: usize> StackVec<T, N> {
                 // This hint is provided to the caller of the `pop`, not the `pop` itself.
                 core::hint::assert_unchecked(self.len < self.capacity());
                 if T::IS_ZST {
-                    Some(ptr::read(ptr::dangling::<T>()))
+                    Some(zst_init())
                 } else {
                     Some(ptr::read(self.as_ptr().add(self.len)))
                 }
@@ -544,11 +544,7 @@ impl<T, const N: usize> StackVec<T, N> {
             None
         } else {
             unsafe {
-                let ptr = if T::IS_ZST {
-                    ptr::dangling_mut::<T>()
-                } else {
-                    self.as_mut_ptr().add(self.len - 1)
-                };
+                let ptr = self.as_mut_ptr().add(self.len - 1);
                 if predicate(&mut *ptr) {
                     self.len -= 1;
                     Some(ptr::read(ptr))
@@ -579,6 +575,7 @@ impl<T, const N: usize> StackVec<T, N> {
     #[inline]
     pub const fn insert(&mut self, index: usize, element: T) {
         assert!(index <= self.len, "insertion index should be <= len");
+        assert!(self.len < N, "length overflow during `insert`");
 
         unsafe {
             self.insert_unchecked(index, element);
@@ -592,6 +589,7 @@ impl<T, const N: usize> StackVec<T, N> {
     #[inline(always)]
     pub(crate) const unsafe fn insert_unchecked(&mut self, index: usize, element: T) {
         debug_assert!(index <= self.len, "insertion index should be <= len");
+        debug_assert!(self.len < N, "length overflow during `insert`");
 
         if T::IS_ZST {
             mem::forget(element);
@@ -634,10 +632,10 @@ impl<T, const N: usize> StackVec<T, N> {
         assert!(index < self.len, "removal index should be < len");
 
         unsafe {
-            let value;
+            let value: T;
 
             if T::IS_ZST {
-                value = ptr::read(ptr::dangling::<T>());
+                value = zst_init();
             } else {
                 let base_ptr = self.as_mut_ptr();
                 value = ptr::read(base_ptr.add(index));
@@ -674,10 +672,10 @@ impl<T, const N: usize> StackVec<T, N> {
         assert!(index < self.len, "removal index should be < len");
 
         unsafe {
-            let value;
+            let value: T;
 
             if T::IS_ZST {
-                value = ptr::read(ptr::dangling::<T>());
+                value = zst_init();
             } else {
                 let ptr = self.as_mut_ptr().add(index);
                 value = ptr::read(ptr);
@@ -714,7 +712,7 @@ impl<T, const N: usize> StackVec<T, N> {
         }
     }
 
-    /// Extracts a mutable slice containing the entire vector.
+    /// Extracts a slice containing the entire vector.
     ///
     /// # Examples
     ///
@@ -730,7 +728,7 @@ impl<T, const N: usize> StackVec<T, N> {
         unsafe { core::slice::from_raw_parts(self.as_ptr(), self.len) }
     }
 
-    /// Extracts a slice containing the entire vector.
+    /// Extracts a mutable slice containing the entire vector.
     ///
     /// # Examples
     ///
@@ -884,7 +882,7 @@ impl<T, const N: usize> StackVec<T, N> {
     ///
     /// # Panics
     ///
-    /// Panics if the new capacity exceeds `N`.
+    /// Panics if the new length exceeds `N`.
     ///
     /// # Examples
     /// ```
@@ -921,7 +919,7 @@ impl<T, const N: usize> StackVec<T, N> {
     ///
     /// # Panics
     ///
-    /// Panics if the new capacity exceeds `N`.
+    /// Panics if the new length exceeds `N`.
     ///
     /// # Examples
     /// ```
@@ -1041,10 +1039,10 @@ impl<T, const N: usize> StackVec<T, N> {
         other
     }
 
-    /// Resizes the StackVec in-place so that len is equal to new_len.
+    /// Resizes the [`StackVec`] in-place so that len is equal to new_len.
     ///
     /// # Panics
-    /// Panics if the new capacity exceeds N.
+    /// Panics if the new length exceeds N.
     ///
     /// # Example
     /// ```
@@ -1099,7 +1097,12 @@ impl<T, const N: usize> StackVec<T, N> {
     /// ```
     #[inline(always)]
     pub const fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
-        &mut self.data
+        unsafe {
+            slice::from_raw_parts_mut(
+                { &raw mut self.data as *mut MaybeUninit<T> }.add(self.len),
+                N - self.len,
+            )
+        }
     }
 }
 
@@ -1639,7 +1642,7 @@ impl<T, const N: usize> Iterator for IntoIter<T, N> {
         if self.index < self.vec.len {
             self.index += 1;
             if T::IS_ZST {
-                unsafe { Some(ptr::read(ptr::dangling::<T>())) }
+                unsafe { Some(zst_init()) }
             } else {
                 unsafe { Some(ptr::read(self.vec.as_ptr().add(self.index - 1))) }
             }
@@ -1661,7 +1664,7 @@ impl<T, const N: usize> DoubleEndedIterator for IntoIter<T, N> {
         if self.index < self.vec.len {
             self.vec.len -= 1;
             if T::IS_ZST {
-                unsafe { Some(ptr::read(ptr::dangling::<T>())) }
+                unsafe { Some(zst_init()) }
             } else {
                 unsafe { Some(ptr::read(self.vec.as_ptr().add(self.vec.len))) }
             }
@@ -2171,26 +2174,5 @@ impl<T: fmt::Debug, F: FnMut(&mut T) -> bool, const N: usize> fmt::Debug
         f.debug_struct("ExtractIf")
             .field("peek", &peek)
             .finish_non_exhaustive()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn empty_support() {
-        let vec: StackVec<(), 0> = stackvec![];
-        assert_eq!(vec.len(), 0);
-        assert_eq!(vec.capacity(), 0);
-        assert_eq!(vec, []);
-    }
-
-    #[test]
-    fn zst_support() {
-        assert_eq!(
-            size_of::<StackVec<(), 100000>>(),
-            size_of::<StackVec<(), 0>>(),
-        );
     }
 }
