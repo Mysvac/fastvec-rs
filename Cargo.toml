@@ -8,7 +8,7 @@ readme = "README.md"
 documentation = "https://docs.rs/fastvec"
 repository = "https://github.com/Mysvac/fastvec-rs"
 description = "A high-performance vector crate tuned for small data sizes."
-rust-version = "1.90.0"
+rust-version = "1.87.0"
 exclude = ["benchmark", ".github"]
 
 [features]
