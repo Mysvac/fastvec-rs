@@ -8,7 +8,7 @@ use core::{
     ptr,
 };
 
-pub use crate::fast_vec_data::FastVecData;
+pub use crate::fast_vec_data::{Drain, ExtractIf, FastVecData, Splice};
 use crate::utils::{IsZST, cold_path};
 
 /// A stack-prioritized vector that automatically spills to the heap when capacity is exceeded.

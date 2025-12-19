@@ -53,7 +53,7 @@ A `Vec` for temporary data that auto-grows. It prefers the stack and switches to
 - Stack-first; no heap allocs for small sizes
 - Guaranteed not slower than `Vec` for large sizes
 
-This container caches pointers to minimize stack/heap checks, keeping performance from degrading (even on the heap it’s no slower than `Vec`) and outperforming `SmallVec`.
+This container caches pointers to minimize stack/heap checks, keeping performance from degrading (even on the heap it’s no slower than `Vec`) and outperforming [`SmallVec`](https://docs.rs/smallvec/latest/smallvec).
 
 ```rust
 let mut vec: FastVec<i32, 5> = fastvec![1, 2, 3];
