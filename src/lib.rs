@@ -125,6 +125,11 @@
 //! Available only on Nightly.
 //!
 //! When enabled, the `cold_path` feature is used to optimize branch prediction.
+//!
+//! ## Update Log
+//! - 1.0.1
+//!     - Lower minimun `rust-version` to 1.87.
+//!     - Re-export `FastVecData`'s `Drain/Splice/ExtractIf` to `fast_vec` module.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(feature = "nightly", feature(cold_path))]
 #![no_std]
