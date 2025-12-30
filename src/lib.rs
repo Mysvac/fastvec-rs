@@ -130,6 +130,8 @@
 //! - 1.0.1
 //!     - Lower minimun `rust-version` to 1.87.
 //!     - Re-export `FastVecData`'s `Drain/Splice/ExtractIf` to `fast_vec` module.
+//! - 1.0.2
+//!     - impl `RefUnwindSafe` for `FastVec` and `FastVecData`.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(feature = "nightly", feature(cold_path))]
 #![no_std]

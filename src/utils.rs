@@ -14,7 +14,10 @@ pub(crate) trait IsZST {
 #[inline(always)]
 pub(crate) const unsafe fn zst_init<T>() -> T {
     debug_assert!(core::mem::size_of::<T>() == 0);
-    unsafe { core::mem::MaybeUninit::uninit().assume_init() }
+    #[allow(clippy::uninit_assumed_init)]
+    unsafe {
+        core::mem::MaybeUninit::uninit().assume_init()
+    }
 }
 
 impl<T> IsZST for T {

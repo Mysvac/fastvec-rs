@@ -286,7 +286,7 @@ impl<T, const N: usize> AutoVec<T, N> {
             }
         } else {
             match &mut self.0 {
-                InnerVec::Stack(_) => return,
+                InnerVec::Stack(_) => (),
                 InnerVec::Heap(vec) => {
                     if capacity > vec.capacity() {
                         // SAFETY: capacity >= len && capacity <= N
@@ -326,7 +326,7 @@ impl<T, const N: usize> AutoVec<T, N> {
             }
         } else {
             match &mut self.0 {
-                InnerVec::Stack(_) => return,
+                InnerVec::Stack(_) => (),
                 InnerVec::Heap(vec) => {
                     if capacity > vec.capacity() {
                         // SAFETY: capacity >= len && capacity <= N
@@ -352,7 +352,7 @@ impl<T, const N: usize> AutoVec<T, N> {
                     self.0 = InnerVec::Stack(unsafe { StackVec::from_vec_unchecked(vec) });
                 }
             }
-            InnerVec::Stack(_) => return,
+            InnerVec::Stack(_) => (),
         }
     }
 
@@ -373,7 +373,7 @@ impl<T, const N: usize> AutoVec<T, N> {
                     self.0 = InnerVec::Stack(unsafe { StackVec::from_vec_unchecked(vec) });
                 }
             }
-            InnerVec::Stack(_) => return,
+            InnerVec::Stack(_) => (),
         }
     }
 

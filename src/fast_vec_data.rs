@@ -7,6 +7,7 @@ use core::{
     cell::Cell,
     fmt,
     mem::{self, MaybeUninit},
+    panic::RefUnwindSafe,
     ptr, slice,
 };
 
@@ -75,6 +76,7 @@ pub struct FastVecData<T, const N: usize> {
 
 unsafe impl<T, const N: usize> Send for FastVecData<T, N> where T: Send {}
 unsafe impl<T, const N: usize> Sync for FastVecData<T, N> where T: Sync {}
+impl<T, const N: usize> RefUnwindSafe for FastVecData<T, N> where T: RefUnwindSafe {}
 
 impl<T, const N: usize> Drop for FastVecData<T, N> {
     // Internal data using `MaybeUninit`, we need to call `drop` manually.
@@ -132,11 +134,9 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// Resources are transferred or released normally.
     #[inline]
     pub(crate) unsafe fn try_dealloc(&mut self) {
-        if !T::IS_ZST {
-            if !self.in_stack {
-                unsafe {
-                    self.dealloc();
-                }
+        if !T::IS_ZST && !self.in_stack {
+            unsafe {
+                self.dealloc();
             }
         }
     }
@@ -166,10 +166,8 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// - Multi-threaded ?
     #[inline(always)]
     pub unsafe fn refresh(&self) {
-        if !T::IS_ZST {
-            if self.in_stack {
-                self.ptr.set(self.stack_ptr() as *mut T);
-            }
+        if !T::IS_ZST && self.in_stack {
+            self.ptr.set(self.stack_ptr() as *mut T);
         }
     }
 
@@ -706,7 +704,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     pub fn truncate(&mut self, len: usize) {
         if len < self.len {
             unsafe {
-                ptr::drop_in_place(slice::from_raw_parts_mut(
+                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
                     self.as_mut_ptr().add(len),
                     self.len - len,
                 ));
@@ -735,7 +733,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     pub fn clear(&mut self) {
         if self.len > 0 {
             unsafe {
-                ptr::drop_in_place(slice::from_raw_parts_mut(self.as_mut_ptr(), self.len));
+                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), self.len));
                 self.len = 0;
             }
         }
@@ -1001,7 +999,7 @@ impl<T, const N: usize> FastVecData<T, N> {
                     left += 1;
                     p_l = ptr.add(left);
                     if right != left {
-                        core::mem::swap(&mut *p_r, &mut *p_l);
+                        ptr::swap(p_r, p_l);
                     }
                 }
             }
@@ -1848,7 +1846,7 @@ impl<'a, I: ExactSizeIterator, const N: usize> Drop for Splice<'a, I, N> {
         // Which means we can replace the slice::Iter with pointers that won't point to deallocated
         // memory, so that Drain::drop is still allowed to call iter.len(), otherwise it would break
         // the ptr.offset_from_unsigned contract.
-        self.drain.iter = (&[]).iter();
+        self.drain.iter = [].iter();
 
         unsafe {
             if self.drain.tail_len == 0 {

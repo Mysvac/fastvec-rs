@@ -47,13 +47,15 @@ use crate::utils::{IsZST, cold_path, zst_init};
 ///
 /// We have made many optimizations to zero size types, many functions only
 /// modify the length, such as `push`, `copy_from_raw` ...
+#[allow(clippy::wrong_self_convention)]
 pub struct StackVec<T, const N: usize> {
     pub(crate) data: [MaybeUninit<T>; N],
     pub(crate) len: usize,
 }
 
-unsafe impl<T, const N: usize> Send for StackVec<T, N> where T: Send {}
-unsafe impl<T, const N: usize> Sync for StackVec<T, N> where T: Sync {}
+// Auto implmented
+// unsafe impl<T, const N: usize> Send for StackVec<T, N> where T: Send {}
+// unsafe impl<T, const N: usize> Sync for StackVec<T, N> where T: Sync {}
 
 impl<T, const N: usize> Drop for StackVec<T, N> {
     // Internal data using `MaybeUninit`, we need to call `drop` manually.
@@ -422,6 +424,7 @@ impl<T, const N: usize> StackVec<T, N> {
     ///
     /// # Safety
     /// The caller must ensure `len <= capacity`.
+    #[allow(clippy::wrong_self_convention)]
     #[inline(always)]
     pub(crate) unsafe fn into_vec_with_capacity_unchecked(&mut self, capacity: usize) -> Vec<T> {
         let mut vec: Vec<T> = Vec::with_capacity(capacity);
@@ -870,7 +873,7 @@ impl<T, const N: usize> StackVec<T, N> {
                     left += 1;
                     p_l = ptr.add(left);
                     if right != left {
-                        core::mem::swap(&mut *p_r, &mut *p_l);
+                        ptr::swap(p_r, p_l);
                     }
                 }
             }
@@ -1687,7 +1690,7 @@ impl<T, const N: usize> Drop for IntoIter<T, N> {
     fn drop(&mut self) {
         if self.index < self.vec.len {
             unsafe {
-                ptr::drop_in_place(core::slice::from_raw_parts_mut(
+                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
                     self.vec.as_mut_ptr().add(self.index),
                     self.vec.len - self.index,
                 ));
@@ -1993,7 +1996,7 @@ impl<'a, I: ExactSizeIterator, const N: usize> Drop for Splice<'a, I, N> {
         // Which means we can replace the slice::Iter with pointers that won't point to deallocated
         // memory, so that Drain::drop is still allowed to call iter.len(), otherwise it would break
         // the ptr.offset_from_unsigned contract.
-        self.drain.iter = (&[]).iter();
+        self.drain.iter = [].iter();
 
         unsafe {
             if self.drain.tail_len == 0 {

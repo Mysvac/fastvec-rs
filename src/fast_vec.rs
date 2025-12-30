@@ -4,6 +4,7 @@ use core::{
     iter::FusedIterator,
     marker::PhantomData,
     mem::{self, ManuallyDrop},
+    panic::RefUnwindSafe,
     pin::Pin,
     ptr,
 };
@@ -228,6 +229,7 @@ pub struct FastVec<T, const N: usize = 8> {
 // All functions have a dependency on [`FastVecData::refresh`], but it doesn't seem thread safe.
 // unsafe impl<T, const N: usize> Sync for FastVecData<T, N> where T: Sync {}
 unsafe impl<T, const N: usize> Send for FastVec<T, N> where T: Send {}
+impl<T, const N: usize> RefUnwindSafe for FastVec<T, N> where T: RefUnwindSafe {}
 
 /// Creates a [`FastVec`] containing the arguments.
 ///
@@ -1070,7 +1072,7 @@ impl<T, const N: usize> Drop for IntoIter<T, N> {
         if self.index < len {
             self.vec.refresh();
             unsafe {
-                ptr::drop_in_place(core::slice::from_raw_parts_mut(
+                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
                     self.vec.inner.as_mut_ptr().add(self.index),
                     len - self.index,
                 ));
