@@ -27,7 +27,6 @@
 //! A great replacement for a plain array `[T; N]`.
 //!
 //! ```rust
-//!
 //! # use fastvec::StackVec;
 //! let mut vec: StackVec<i32, 10> = StackVec::new();
 //!
@@ -132,6 +131,8 @@
 //!     - Re-export `FastVecData`'s `Drain/Splice/ExtractIf` to `fast_vec` module.
 //! - 1.0.2
 //!     - impl `RefUnwindSafe` for `FastVec` and `FastVecData`.
+//! - 1.0.3
+//!     - Add `try_push` method for `StackVec`.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(feature = "nightly", feature(cold_path))]
 #![no_std]

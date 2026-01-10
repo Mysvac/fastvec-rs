@@ -12,21 +12,28 @@ use core::{
 pub use crate::fast_vec_data::{Drain, ExtractIf, FastVecData, Splice};
 use crate::utils::{IsZST, cold_path};
 
-/// A stack-prioritized vector that automatically spills to the heap when capacity is exceeded.
+/// A stack-prioritized vector that automatically spills to the heap
+/// when capacity is exceeded.
 ///
-/// Unlike [`SmallVec`](https://docs.rs/smallvec/latest/smallvec/), [`FastVec`] uses **pointer caching**
-/// to avoid conditional checks on every operation, achieving higher performance.
+/// Unlike [`SmallVec`](https://docs.rs/smallvec/latest/smallvec/),
+/// [`FastVec`] uses **pointer caching** to avoid conditional checks
+/// on every operation, achieving higher performance.
 ///
-/// When the data is in the stack area, the execution efficiency is almost the same as `[T; N]`.
-/// Even if switching to the heap, it won't be slower than [`Vec`].
+/// When the data is in the stack area, the execution efficiency is
+/// almost the same as `[T; N]`. Even if switching to the heap, it
+/// won't be slower than [`Vec`].
 ///
-/// But the cost is that this type is [`!Sync`](Sync) and requires operate through [`FastVecData`].
+/// But the cost is that this type is [`!Sync`](Sync) and requires
+/// operate through [`FastVecData`].
 ///
-/// So the real advantage of [`FastVec`] lies in data processing rather than storage,
-/// and it is usually recommended to convert it to [`Vec`] when transferring data.
+/// So the real advantage of [`FastVec`] lies in data processing rather
+/// than storage, and it is usually recommended to convert it to [`Vec`]
+/// when transferring data.
 ///
-/// If [`FastVec`]'s data is already in the heap, this conversion only requires copying pointers, which is very cheap.
-/// If it is on the stack, it is equivalent to only applying for heap memory once, won't be more expensive than using [`Vec`].
+/// If [`FastVec`]'s data is already in the heap, this conversion only
+/// requires copying pointers, which is very cheap. If it is on the stack,
+/// it is equivalent to only applying for heap memory once, won't be more
+/// expensive than using [`Vec`].
 ///
 /// # Quick Start
 ///
@@ -103,7 +110,8 @@ use crate::utils::{IsZST, cold_path};
 /// ## Trait Implementations
 ///
 /// [`FastVec`] implements [`Deref`](core::ops::Deref), [`Index`](core::ops::Index),
-/// [`Debug`](core::fmt::Debug), etc., via [`as_slice`](FastVec::as_slice) and [`as_mut_slice`](FastVec::as_mut_slice):
+/// [`Debug`](core::fmt::Debug), etc., via [`as_slice`](FastVec::as_slice) and
+/// [`as_mut_slice`](FastVec::as_mut_slice):
 ///
 /// ```
 /// # use fastvec::FastVec;
@@ -211,10 +219,12 @@ use crate::utils::{IsZST, cold_path};
 ///
 /// # Thread Safety
 ///
-/// **[`FastVec`]**: Implements [`Send`] but **not** [`Sync`] due to internal [`Cell`](core::cell::Cell) usage
-/// (required for pointer relocation). Concurrent calls to [`as_slice`](FastVec::as_slice) may race.
+/// **[`FastVec`]**: Implements [`Send`] but **not** [`Sync`] due to internal
+/// [`Cell`](core::cell::Cell) usage (required for pointer relocation). Concurrent
+/// calls to [`as_slice`](FastVec::as_slice) may race.
 ///
-/// - **[`FastVecData`]**: Implements both [`Send`] and [`Sync`], so you can safely share its reference across threads.
+/// - **[`FastVecData`]**: Implements both [`Send`] and [`Sync`], so you can safely
+///   share its reference across threads.
 ///
 /// It's not recommended to store this struct in [`Arc`](alloc::sync::Arc),
 /// and it is better to use [`Vec`] directly when heap memory is already in use.

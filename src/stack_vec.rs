@@ -472,6 +472,43 @@ impl<T, const N: usize> StackVec<T, N> {
         self.len = len + 1;
     }
 
+    /// Appends an element to the back of the vector.
+    /// Return `Err` if it's full.
+    ///
+    /// # Time complexity
+    /// O(1)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fastvec::StackVec;
+    /// let mut vec = StackVec::<i32, 2>::new();
+    ///
+    /// assert!(vec.try_push(1).is_ok());
+    /// assert!(vec.try_push(2).is_ok());
+    ///
+    /// assert_eq!(vec.try_push(3), Err(3));
+    /// ```
+    #[inline(always)]
+    pub const fn try_push(&mut self, value: T) -> Result<(), T> {
+        let len: usize = self.len;
+
+        if len < N {
+            if T::IS_ZST {
+                mem::forget(value);
+            } else {
+                unsafe {
+                    ptr::write(self.as_mut_ptr().add(len), value);
+                }
+            }
+            self.len = len + 1;
+
+            Ok(())
+        } else {
+            Err(value)
+        }
+    }
+
     /// Appends an element to the back of the vector without bounds checking.
     ///
     /// # Safety
@@ -1863,7 +1900,7 @@ impl<'a, T: 'a, const N: usize> Drop for Drain<'a, T, N> {
 
         let mut vec = self.vec;
 
-        if core::mem::size_of::<T>() == 0 {
+        if T::IS_ZST {
             // ZSTs have no identity, so we don't need to move them around, we only need to drop the correct amount.
             // this can be achieved by manipulating the Vec length instead of moving values out from `iter`.
             unsafe {

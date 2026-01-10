@@ -573,9 +573,11 @@ impl<T, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Inserts an element at position `index` within the vector, shifting all elements after it to the right.
+    /// Inserts an element at position `index` within the vector,
+    /// shifting all elements after it to the right.
     ///
-    /// If the heap is insufficient, it will switch to [`Vec`] and reserve some additional memory.
+    /// If the heap is insufficient, it will switch to [`Vec`] and
+    /// reserve some additional memory.
     ///
     /// # Panics
     /// Panics if `index > len`.
@@ -630,10 +632,13 @@ impl<T, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Removes and returns the element at position index within the vector, shifting all elements after it to the left.
+    /// Removes and returns the element at position index within the
+    /// vector, shifting all elements after it to the left.
     ///
-    /// Note: Because this shifts over the remaining elements, it has a worst-case performance of O(n).
-    /// If you don’t need the order of elements to be preserved, use [`swap_remove`](AutoVec::swap_remove) instead.
+    /// Note: Because this shifts over the remaining elements, it has a
+    /// worst-case performance of O(n). If you don’t need the order of
+    /// elements to be preserved, use [`swap_remove`](AutoVec::swap_remove)
+    /// instead.
     ///
     /// This function does not affect the position (stack/heap) of the data.
     ///
@@ -671,7 +676,8 @@ impl<T, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Retains only the elements specified by the predicate, passing a mutable reference to it.
+    /// Retains only the elements specified by the predicate,
+    /// passing a mutable reference to it.
     #[inline]
     pub fn retain_mut<F: FnMut(&mut T) -> bool>(&mut self, f: F) {
         match &mut self.0 {
@@ -683,7 +689,8 @@ impl<T, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Removes all but the first of consecutive elements in the vector that resolve to the same key.
+    /// Removes all but the first of consecutive elements in
+    /// the vector that resolve to the same key.
     #[inline]
     pub fn dedup_by_key<F, K>(&mut self, key: F)
     where
@@ -699,7 +706,8 @@ impl<T, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Removes all but the first of consecutive elements in the vector satisfying a given equality relation.
+    /// Removes all but the first of consecutive elements in
+    /// the vector satisfying a given equality relation.
     #[inline]
     pub fn dedup_by<F: FnMut(&mut T, &mut T) -> bool>(&mut self, same_bucket: F) {
         match &mut self.0 {
@@ -713,11 +721,13 @@ impl<T, const N: usize> AutoVec<T, N> {
 
     /// Appends an element to the back of a collection.
     ///
-    /// If the heap is insufficient, it will switch to [`Vec`] and reserve some additional memory.
+    /// If the heap is insufficient, it will switch to [`Vec`]
+    /// and reserve some additional memory.
     ///
     /// # Time complexity
-    /// Takes amortized O(1) time. If the vector’s length would exceed its capacity after the push,
-    /// O(capacity) time is taken to copy the vector’s elements to a larger allocation.
+    /// Takes amortized O(1) time. If the vector’s length would
+    /// exceed its capacity after the push, *O(capacity)* time is
+    /// taken to copy the vector’s elements to a larger allocation.
     ///
     /// # Examples
     /// ```
@@ -756,7 +766,8 @@ impl<T, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Removes the last element from a vector and returns it, or None if it is empty.
+    /// Removes the last element from a vector and returns it,
+    /// or `None` if it is empty.
     ///
     /// This function does not affect the position (stack/heap) of the data.
     ///
@@ -782,7 +793,8 @@ impl<T, const N: usize> AutoVec<T, N> {
     }
 
     /// Removes and returns the last element from a vector if the predicate returns `true`,
-    /// or `None` if the predicate returns false or the vector is empty (the predicate will not be called in that case).
+    /// or `None` if the predicate returns false or the vector is empty
+    /// (the predicate will not be called in that case).
     #[inline]
     pub fn pop_if(&mut self, predicate: impl FnOnce(&mut T) -> bool) -> Option<T> {
         match &mut self.0 {
@@ -1017,8 +1029,9 @@ impl<T: Clone, const N: usize> AutoVec<T, N> {
 
     /// Resizes the [`AutoVec`] in-place so that len is equal to `new_len`.
     ///
-    /// If `new_len` is greater than `len`, the [`AutoVec`] is extended by the difference,
-    /// with each additional slot filled with value. If `new_len` is less than `len`, the [`AutoVec`] is simply truncated.
+    /// If `new_len` is greater than `len`, the [`AutoVec`] is extended
+    /// by the difference, with each additional slot filled with value.
+    /// If `new_len` is less than `len`, the [`AutoVec`] is simply truncated.
     ///
     /// This function may move data from the stack to the heap (if capacity is insufficient),
     /// but it will not move data from the heap to the stack.
@@ -1087,7 +1100,8 @@ impl<T: Clone, const N: usize> AutoVec<T, N> {
         }
     }
 
-    /// Given a range src, clones a slice of elements in that range and appends it to the end..
+    /// Given a range src, clones a slice of elements in
+    /// that range and appends it to the end..
     #[inline]
     pub fn extend_from_within<R: core::ops::RangeBounds<usize>>(&mut self, src: R) {
         match &mut self.0 {
@@ -1113,7 +1127,8 @@ impl<T: Clone, const N: usize> AutoVec<T, N> {
 }
 
 impl<T: PartialEq, const N: usize> AutoVec<T, N> {
-    /// Removes consecutive repeated elements in the vector according to the PartialEq trait implementation.
+    /// Removes consecutive repeated elements in the vector according
+    /// to the PartialEq trait implementation.
     #[inline]
     pub fn dedup(&mut self) {
         match &mut self.0 {

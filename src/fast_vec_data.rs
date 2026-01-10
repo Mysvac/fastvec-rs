@@ -1892,7 +1892,7 @@ impl<'a, I: ExactSizeIterator, const N: usize> Drop for Splice<'a, I, N> {
 
 /// An iterator which uses a closure to determine if an element should be removed.
 ///
-/// See [`StackVec::extract_if`] .
+/// See [`Vec::extract_if`] .
 pub struct ExtractIf<'a, T, F: FnMut(&mut T) -> bool, const N: usize> {
     vec: &'a mut FastVecData<T, N>,
     idx: usize,
