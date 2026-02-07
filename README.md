@@ -60,14 +60,14 @@ let mut vec: FastVec<i32, 5> = fastvec![1, 2, 3];
 assert_eq!(vec.capacity(), 5);
 
 // Auto-grows; switches to heap when needed
-vec.get().extend([4, 5, 6, 7, 8]);
+vec.data().extend([4, 5, 6, 7, 8]);
 assert!(!vec.in_stack()); // Now on heap
 assert_eq!(vec, [1, 2, 3, 4, 5, 6, 7, 8])
 ```
 
-Pointer caching introduces self-references, so it is `!Sync`. Any data access must first call `get` to obtain the correct `FastVecData` reference.
+Pointer caching introduces self-references, so it is `!Sync`. Any data access must first call `data` to obtain the correct `FastVecData` reference.
 
-`get` incurs one branch and pointer assignment; typically you should grab the data reference once, use it via references, and only switch when you need to move the data.
+`data` incurs one branch and pointer assignment; typically you should grab the data reference once, use it via references, and only switch when you need to move the data.
 
 See the `FastVec` docs for details.
 
@@ -96,7 +96,7 @@ assert!(!vec.in_stack()); // Now on heap
 assert_eq!(vec, [1, 2, 3, 4, 5, 6, 7, 8])
 ```
 
-Supports all `Vec` operations without needing `get`.
+Supports all `Vec` operations without needing `data()`.
 
 See the `AutoVec` docs for details.
 

@@ -21,7 +21,7 @@ use crate::utils::{IsZST, cold_path};
 /// Calling `refresh` adds a branch and assignment, and it is unsafe to require callers to do it manually.
 ///
 /// Instead, all constructors are hidden behind the [`FastVec`](crate::FastVec) wrapper.
-/// Use [`get`](crate::FastVec::get) to obtain [`&FastVecData`](FastVecData);
+/// Use [`data`](crate::FastVec::data) to obtain [`&FastVecData`](FastVecData);
 /// these entry points refresh automatically.
 ///
 /// During the reference's lifetime the data will not move, so subsequent operations are safe.
@@ -31,7 +31,7 @@ use crate::utils::{IsZST, cold_path};
 /// ```
 /// # use fastvec::{FastVec, fast_vec::FastVecData};
 /// let mut state: FastVec<i32> = [1, 2, 3, 4].into();
-/// let vec = state.get();
+/// let vec = state.data();
 ///
 /// vec.push(5);
 /// vec.push(6);
@@ -44,7 +44,7 @@ use crate::utils::{IsZST, cold_path};
 /// ```
 /// # use fastvec::FastVec;
 /// let mut state: FastVec<i32, 8> = [1, 2, 3, 4].into();
-/// let vec = state.get();
+/// let vec = state.data();
 ///
 /// assert_eq!(vec.capacity(), 8);
 /// assert_eq!(vec.len(), 4);
@@ -441,7 +441,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<i32, 8> = [1, 2, 3, 4].into();
-    /// let vec = state.get();
+    /// let vec = state.data();
     /// assert_eq!(vec.capacity(), 8);
     /// assert_eq!(vec.len(), 4);
     ///
@@ -461,7 +461,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<i32, 8> = [1, 2, 3, 4].into();
-    /// let vec = state.get();
+    /// let vec = state.data();
     /// assert_eq!(vec.capacity(), 8);
     /// assert_eq!(vec.len(), 4);
     ///
@@ -481,7 +481,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<i32> = FastVec::new();
-    /// let vec = state.get();
+    /// let vec = state.data();
     /// assert!(vec.is_empty());
     ///
     /// vec.push(1);
@@ -499,7 +499,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<i32, 8> = [1, 2, 3, 4].into();
-    /// let vec = state.get();
+    /// let vec = state.data();
     /// assert!(vec.in_stack());
     ///
     /// vec.extend([1, 2, 3,  4, 5]);
@@ -521,7 +521,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<i32, 8> = FastVec::new();
-    /// let vec = state.get();
+    /// let vec = state.data();
     ///
     /// vec.reserve(5); // do nothing
     /// assert!(vec.in_stack());
@@ -576,7 +576,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<i32, 10> = [1, 2, 3].into();
-    /// let vec = state.get();
+    /// let vec = state.data();
     ///
     /// assert!(vec.capacity() == 10);
     /// vec.shrink_to(4);
@@ -615,7 +615,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<i32, 10> = [1, 2, 3].into();
-    /// let vec = state.get();
+    /// let vec = state.data();
     ///
     /// assert!(vec.capacity() == 10);
     /// vec.shrink_to_fit();
@@ -691,7 +691,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<i32, 3> = [1, 2, 3, 4].into();
-    /// let vec = state.get();
+    /// let vec = state.data();
     ///
     /// assert!(!vec.in_stack());
     ///
@@ -722,7 +722,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<i32, 3> = [1, 2, 3, 4].into();
-    /// let vec = state.get();
+    /// let vec = state.data();
     ///
     /// vec.clear();
     ///
@@ -775,7 +775,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<&'static str> = ["foo", "bar", "baz", "qux"].into();
-    /// let v = state.get();
+    /// let v = state.data();
     ///
     /// assert_eq!(v.swap_remove(1), "bar");
     /// assert_eq!(v, &["foo", "qux", "baz"]);
@@ -814,7 +814,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<char> = ['a', 'b', 'c'].into();
-    /// let vec = state.get();
+    /// let vec = state.data();
     ///
     /// vec.insert(1, 'd');
     /// assert_eq!(vec, &['a', 'd', 'b', 'c']);
@@ -881,7 +881,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<char> = ['a', 'b', 'c'].into();
-    /// let v = state.get();
+    /// let v = state.data();
     ///
     /// assert_eq!(v.remove(1), 'b');
     /// assert_eq!(v, &['a', 'c']);
@@ -918,7 +918,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<_> = [1, 2, 3, 4, 5].into();
-    /// let vec = state.get();
+    /// let vec = state.data();
     ///
     /// let keep = [false, true, true, false, true];
     /// let mut iter = keep.iter();
@@ -942,7 +942,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut state: FastVec<_> = [1, 2, 3, 4, 5].into();
-    /// let vec = state.get();
+    /// let vec = state.data();
     ///
     /// let keep = [false, true, true, false, true];
     /// let mut iter = keep.iter();
@@ -979,7 +979,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_> = ["foo", "bar", "Bar", "baz", "bar"].into();
     ///
-    /// vec.get().dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    /// vec.data().dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     ///
     /// assert_eq!(vec, ["foo", "bar", "baz", "bar"]);
     /// ```
@@ -1020,7 +1020,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_> = [10, 20, 21, 30, 20].into();
     ///
-    /// vec.get().dedup_by_key(|i| *i / 10);
+    /// vec.data().dedup_by_key(|i| *i / 10);
     ///
     /// assert_eq!(vec, [10, 20, 30, 20]);
     /// ```
@@ -1049,7 +1049,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_> = [1, 2].into();
     ///
-    /// vec.get().push(3);
+    /// vec.data().push(3);
     ///
     /// assert_eq!(vec, [1, 2, 3]);
     /// ```
@@ -1096,7 +1096,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_> = [1, 2, 3].into();
-    /// assert_eq!(vec.get().pop(), Some(3));
+    /// assert_eq!(vec.data().pop(), Some(3));
     /// assert_eq!(vec, [1, 2]);
     /// ```
     #[inline]
@@ -1128,9 +1128,9 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// let mut vec: FastVec<_> = [1, 2, 3, 4].into();
     /// let pred = |x: &mut i32| *x % 2 == 0;
     ///
-    /// assert_eq!(vec.get().pop_if(pred), Some(4));
+    /// assert_eq!(vec.data().pop_if(pred), Some(4));
     /// assert_eq!(vec, [1, 2, 3]);
-    /// assert_eq!(vec.get().pop_if(pred), None);
+    /// assert_eq!(vec.data().pop_if(pred), None);
     /// ```
     #[inline]
     pub fn pop_if(&mut self, predicate: impl FnOnce(&mut T) -> bool) -> Option<T> {
@@ -1168,7 +1168,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_, 5> = [1, 2, 3].into();
     /// let mut vec2: FastVec<_, 3> = [4, 5, 6].into();
-    /// vec.get().append(vec2.get());
+    /// vec.data().append(vec2.data());
     ///
     /// assert_eq!(vec, [1, 2, 3, 4, 5, 6]);
     /// assert_eq!(vec2, []);
@@ -1213,7 +1213,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_> = ['a', 'b', 'c'].into();
-    /// let vec2: FastVec<_> = vec.get().split_off(1);
+    /// let vec2: FastVec<_> = vec.data().split_off(1);
     ///
     /// assert_eq!(vec, ['a']);
     /// assert_eq!(vec2, ['b', 'c']);
@@ -1225,7 +1225,7 @@ impl<T, const N: usize> FastVecData<T, N> {
 
         unsafe {
             let mut state = <crate::fast_vec::FastVec<T, N>>::with_capacity(other_len);
-            let other = state.get();
+            let other = state.data();
             other.len = other_len;
             self.len = at;
             if !T::IS_ZST {
@@ -1248,11 +1248,11 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_> = [1, 2, 3].into();
-    /// vec.get().resize_with(5, Default::default);
+    /// vec.data().resize_with(5, Default::default);
     ///
     /// let mut vec: FastVec<i32> = [].into();
     /// let mut p = 1;
-    /// vec.get().resize_with(4, || { p *= 2; p });
+    /// vec.data().resize_with(4, || { p *= 2; p });
     /// assert_eq!(vec, [2, 4, 8, 16]);
     /// ```
     pub fn resize_with<F: FnMut() -> T>(&mut self, new_len: usize, mut f: F) {
@@ -1292,7 +1292,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<i32> = FastVec::with_capacity(10);
-    /// let v = vec.get();
+    /// let v = vec.data();
     ///
     /// let uninit = v.spare_capacity_mut();
     /// uninit[0].write(0);
@@ -1330,11 +1330,11 @@ impl<T: Clone, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_> = ["hello"].into();
-    /// vec.get().resize(3, "world");;
+    /// vec.data().resize(3, "world");;
     /// assert_eq!(vec, ["hello", "world", "world"]);
     ///
     /// let mut vec: FastVec<_> = ['a', 'b', 'c', 'd'].into();
-    /// vec.get().resize(2, '_');
+    /// vec.data().resize(2, '_');
     /// assert_eq!(vec, ['a', 'b']);
     /// ```
     pub fn resize(&mut self, new_len: usize, value: T) {
@@ -1366,7 +1366,7 @@ impl<T: Clone, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_> = [1].into();
-    /// vec.get().extend_from_slice(&[2, 3, 4]);
+    /// vec.data().extend_from_slice(&[2, 3, 4]);
     /// assert_eq!(vec, [1, 2, 3, 4]);
     /// ```
     pub fn extend_from_slice(&mut self, other: &[T]) {
@@ -1396,7 +1396,7 @@ impl<T: Clone, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_> = ['a', 'b', 'c', 'd', 'e'].into();
-    /// vec.get().extend_from_within(2..);
+    /// vec.data().extend_from_within(2..);
     /// assert_eq!(vec, ['a', 'b', 'c', 'd', 'e', 'c', 'd', 'e']);
     /// ```
     pub fn extend_from_within<R: core::ops::RangeBounds<usize>>(&mut self, src: R) {
@@ -1424,13 +1424,13 @@ impl<T: Clone, const N: usize> FastVecData<T, N> {
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_> = [1, 2, 3, 4].into();
     ///
-    /// let vec2 = vec.get().clone_up();
+    /// let vec2 = vec.data().clone_up();
     /// assert_eq!(vec, vec2);
     /// assert_eq!(vec, [1, 2, 3, 4]);
     /// ```
     pub fn clone_up(&self) -> crate::fast_vec::FastVec<T, N> {
         let mut vec = <crate::fast_vec::FastVec<T, N>>::with_capacity(self.len);
-        let dst = vec.get();
+        let dst = vec.data();
         for item in self.as_slice() {
             unsafe {
                 dst.push_unchecked(item.clone());
@@ -1449,7 +1449,7 @@ impl<T: Clone, const N: usize> FastVecData<T, N> {
     ///
     /// let mut vec2 = <FastVec<i32>>::new();
     ///
-    /// vec2.get().clone_from(vec.get());
+    /// vec2.data().clone_from(vec.data());
     ///
     /// assert_eq!(vec, vec2);
     /// assert_eq!(vec2, [1, 2, 3, 4]);
@@ -1509,7 +1509,7 @@ impl<T: PartialEq, const N: usize> FastVecData<T, N> {
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<i32> = [1, 2, 2, 3, 3, 2].into();
     ///
-    /// vec.get().dedup();
+    /// vec.data().dedup();
     ///
     /// assert_eq!(vec, [1, 2, 3, 2]);
     /// ```
@@ -1528,7 +1528,7 @@ impl<'a, T: 'a + Clone, const N: usize> Extend<&'a T> for FastVecData<T, N> {
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<i32> = [1, 2, 3].into();
     ///
-    /// vec.get().extend(&[4, 5, 6]);
+    /// vec.data().extend(&[4, 5, 6]);
     ///
     /// assert_eq!(vec, [1, 2, 3, 4, 5, 6]);
     /// ```
@@ -1548,7 +1548,7 @@ impl<T, const N: usize> Extend<T> for FastVecData<T, N> {
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<i32> = [1, 2, 3].into();
     ///
-    /// vec.get().extend([4, 5, 6]);
+    /// vec.data().extend([4, 5, 6]);
     ///
     /// assert_eq!(vec, [1, 2, 3, 4, 5, 6]);
     /// ```
@@ -1605,12 +1605,12 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::{FastVec, fastvec};
     /// let mut v: FastVec<_> = fastvec![1, 2, 3];
-    /// let u: Vec<_> = v.get().drain(1..).collect();
+    /// let u: Vec<_> = v.data().drain(1..).collect();
     /// assert_eq!(v, [1]);
     /// assert_eq!(u, [2, 3]);
     ///
     /// // A full range clears the vector, like `clear()` does
-    /// v.get().drain(..);
+    /// v.data().drain(..);
     /// assert_eq!(v, []);
     /// ```
     pub fn drain<R: core::ops::RangeBounds<usize>>(&mut self, range: R) -> Drain<'_, T, N> {
@@ -1786,7 +1786,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// # use fastvec::{fastvec, FastVec};
     /// let mut v: FastVec<_> = fastvec![1, 2, 3, 4];
     /// let new = [7, 8, 9];
-    /// let u: Vec<_> = v.get().splice(1..3, new).collect();
+    /// let u: Vec<_> = v.data().splice(1..3, new).collect();
     /// assert_eq!(v, [1, 7, 8, 9, 4]);
     /// assert_eq!(u, [2, 3]);
     /// ```
@@ -1798,7 +1798,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// # use fastvec::{fastvec, FastVec};
     /// let mut v: FastVec<_> = fastvec![1, 5];
     /// let new = [2, 3, 4];
-    /// v.get().splice(1..1, new);
+    /// v.data().splice(1..1, new);
     /// assert_eq!(v, [1, 2, 3, 4, 5]);
     /// ```
     pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Splice<'_, I::IntoIter, N>
@@ -1919,7 +1919,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// # use fastvec::{fastvec, FastVec};
     /// let mut numbers: FastVec<_> = fastvec![1, 2, 3, 4, 5, 6, 8, 9, 11, 13, 14, 15];
     ///
-    /// let evens = numbers.get().extract_if(.., |x| *x % 2 == 0).collect::<FastVec<_, 10>>();
+    /// let evens = numbers.data().extract_if(.., |x| *x % 2 == 0).collect::<FastVec<_, 10>>();
     /// let odds = numbers;
     ///
     /// assert_eq!(evens, [2, 4, 6, 8, 14]);
@@ -1931,7 +1931,7 @@ impl<T, const N: usize> FastVecData<T, N> {
     /// ```
     /// # use fastvec::{fastvec, FastVec};
     /// let mut items: FastVec<_> = fastvec![0, 0, 0, 0, 0, 0, 0, 1, 2, 1, 2, 1, 2];
-    /// let ones = items.get().extract_if(7.., |x| *x == 1).collect::<Vec<_>>();
+    /// let ones = items.data().extract_if(7.., |x| *x == 1).collect::<Vec<_>>();
     /// assert_eq!(items, [0, 0, 0, 0, 0, 0, 0, 2, 2, 2]);
     /// assert_eq!(ones.len(), 3);
     /// ```

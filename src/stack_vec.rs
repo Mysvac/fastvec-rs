@@ -1,10 +1,10 @@
-use alloc::{boxed::Box, vec::Vec};
-use core::{
-    fmt,
-    iter::FusedIterator,
-    mem::{self, ManuallyDrop, MaybeUninit},
-    ptr, slice,
-};
+#![allow(clippy::wrong_self_convention)]
+
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::iter::FusedIterator;
+use core::mem::{self, ManuallyDrop, MaybeUninit};
+use core::{fmt, ptr, slice};
 
 use crate::utils::{IsZST, cold_path, zst_init};
 
@@ -47,7 +47,6 @@ use crate::utils::{IsZST, cold_path, zst_init};
 ///
 /// We have made many optimizations to zero size types, many functions only
 /// modify the length, such as `push`, `copy_from_raw` ...
-#[allow(clippy::wrong_self_convention)]
 pub struct StackVec<T, const N: usize> {
     pub(crate) data: [MaybeUninit<T>; N],
     pub(crate) len: usize,
@@ -60,10 +59,11 @@ pub struct StackVec<T, const N: usize> {
 impl<T, const N: usize> Drop for StackVec<T, N> {
     // Internal data using `MaybeUninit`, we need to call `drop` manually.
     fn drop(&mut self) {
-        if self.len > 0 {
+        if mem::needs_drop::<T>() && self.len > 0 {
             // SAFETY: Ensure the validity of data within the range.
             unsafe {
-                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), self.len));
+                let to_drop = ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), self.len);
+                ptr::drop_in_place(to_drop);
             }
         }
     }
@@ -424,13 +424,11 @@ impl<T, const N: usize> StackVec<T, N> {
     ///
     /// # Safety
     /// The caller must ensure `len <= capacity`.
-    #[allow(clippy::wrong_self_convention)]
     #[inline(always)]
     pub(crate) unsafe fn into_vec_with_capacity_unchecked(&mut self, capacity: usize) -> Vec<T> {
         let mut vec: Vec<T> = Vec::with_capacity(capacity);
 
         unsafe {
-            core::hint::assert_unchecked(self.len <= capacity);
             ptr::copy_nonoverlapping(self.as_ptr(), vec.as_mut_ptr(), self.len);
             vec.set_len(self.len);
             self.len = 0;
@@ -1137,12 +1135,7 @@ impl<T, const N: usize> StackVec<T, N> {
     /// ```
     #[inline(always)]
     pub const fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
-        unsafe {
-            slice::from_raw_parts_mut(
-                { &raw mut self.data as *mut MaybeUninit<T> }.add(self.len),
-                N - self.len,
-            )
-        }
+        unsafe { slice::from_raw_parts_mut(self.data.as_mut_ptr().add(self.len), N - self.len) }
     }
 }
 
@@ -1587,7 +1580,7 @@ impl<T, const N: usize, const P: usize> From<crate::FastVec<T, P>> for StackVec<
     fn from(mut value: crate::FastVec<T, P>) -> Self {
         let len = value.len();
         assert!(len <= N, "length overflow when `from`");
-        let vec = value.get();
+        let vec = value.data();
         vec.len = 0;
         unsafe { Self::copy_from_raw(vec.as_ptr(), len) }
     }

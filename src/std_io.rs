@@ -50,7 +50,7 @@ impl<const N: usize> Write for FastVec<u8, N> {
         let len = self.len();
         let num = buf.len();
 
-        let vec = self.get();
+        let vec = self.data();
 
         vec.reserve(num);
 
@@ -71,7 +71,7 @@ impl<const N: usize> Write for FastVec<u8, N> {
     fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> std::io::Result<usize> {
         let num = bufs.iter().map(|b| b.len()).sum::<usize>();
 
-        let vec = self.get();
+        let vec = self.data();
         vec.reserve(num);
         for buf in bufs {
             let buf_len = buf.len();
@@ -141,7 +141,7 @@ impl<const N: usize> Write for AutoVec<u8, N> {
     }
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::io::{IoSlice, Write};

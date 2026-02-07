@@ -225,7 +225,7 @@ impl VecLike for FastVec<u64, SMALL_SIZE> {
     }
     #[inline(always)]
     fn accessor(&mut self) -> impl Accessor<'_> {
-        self.get()
+        self.data()
     }
 }
 
@@ -260,28 +260,28 @@ impl VecLike for FastVec<u64, SMALL_SIZE_1> {
 impl<'a> Accessor<'a> for &'a mut FastVec<u64, SMALL_SIZE_1> {
     #[inline(always)]
     fn push(&mut self, value: u64) {
-        (*self).get().push(value);
+        (*self).data().push(value);
     }
     #[inline(always)]
     fn pop(&mut self) -> Option<u64> {
-        (*self).get().pop()
+        (*self).data().pop()
     }
     #[inline(always)]
     fn insert(&mut self, index: usize, value: u64) {
-        (*self).get().insert(index, value);
+        (*self).data().insert(index, value);
     }
     #[inline(always)]
     fn remove(&mut self, index: usize) -> u64 {
-        (*self).get().remove(index)
+        (*self).data().remove(index)
     }
     #[inline(always)]
     fn get_mut(&mut self, index: usize) -> &mut u64 {
-        &mut (*self).get()[index]
+        &mut (*self).data()[index]
     }
     #[inline(always)]
     fn set_len(&mut self, len: usize) {
         unsafe {
-            (*self).get().set_len(len);
+            (*self).data().set_len(len);
         }
     }
 }

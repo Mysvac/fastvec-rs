@@ -1,11 +1,9 @@
 use crate::{AutoVec, FastVec, StackVec};
 use alloc::format;
 use core::marker::PhantomData;
-use serde_core::{
-    Deserialize, Deserializer, Serialize, Serializer,
-    de::{self, SeqAccess, Visitor},
-    ser::SerializeSeq,
-};
+use serde_core::de::{self, SeqAccess, Visitor};
+use serde_core::ser::SerializeSeq;
+use serde_core::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[cfg(feature = "serde")]
 impl<T: Serialize, const N: usize> Serialize for StackVec<T, N> {
@@ -131,7 +129,7 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for FastVec<T, N
                     None => FastVec::new(),
                 };
 
-                let vec_mut = vec.get();
+                let vec_mut = vec.data();
 
                 while let Some(element) = seq.next_element::<T>()? {
                     vec_mut.push(element);

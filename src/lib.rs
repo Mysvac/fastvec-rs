@@ -61,15 +61,15 @@
 //! assert_eq!(vec.capacity(), 5);
 //!
 //! // Auto-grows; switches to heap when needed
-//! vec.get().extend([4, 5, 6, 7, 8]);
+//! vec.data().extend([4, 5, 6, 7, 8]);
 //! assert!(!vec.in_stack()); // Now on heap
 //! assert_eq!(vec, [1, 2, 3, 4, 5, 6, 7, 8])
 //! ```
 //!
 //! Pointer caching introduces self-references, so it is `!Sync`. Any data access must
-//! first call [`get`](FastVec::get) to obtain the correct [`FastVecData`](fast_vec::FastVecData) reference.
+//! first call [`data`](FastVec::data) to obtain the correct [`FastVecData`](fast_vec::FastVecData) reference.
 //!
-//! `get` incurs one branch and pointer assignment; typically you should grab the data reference once, use it via references, and only switch when you need to move the data.
+//! `data` incurs one branch and pointer assignment; typically you should grab the data reference once, use it via references, and only switch when you need to move the data.
 //!
 //! See the [`FastVec`] docs for details.
 //!
@@ -99,7 +99,7 @@
 //! assert_eq!(vec, [1, 2, 3, 4, 5, 6, 7, 8])
 //! ```
 //!
-//! Supports all [`Vec`](alloc::vec::Vec) operations without needing `get`.
+//! Supports all [`Vec`](alloc::vec::Vec) operations without needing `data()`.
 //!
 //! See the [`AutoVec`] docs for details.
 //!
@@ -133,6 +133,9 @@
 //!     - impl `RefUnwindSafe` for `FastVec` and `FastVecData`.
 //! - 1.0.3
 //!     - Add `try_push` method for `StackVec`.
+//! - 1.1.0
+//!     - Replace `FastVec::get` with `FastVec::data`.
+//!     - Delete `FastVec::into_pinned_box`.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(feature = "nightly", feature(cold_path))]
 #![no_std]

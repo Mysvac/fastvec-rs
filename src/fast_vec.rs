@@ -5,7 +5,6 @@ use core::{
     marker::PhantomData,
     mem::{self, ManuallyDrop},
     panic::RefUnwindSafe,
-    pin::Pin,
     ptr,
 };
 
@@ -60,12 +59,12 @@ use crate::utils::{IsZST, cold_path};
 /// ## Modifying Data
 ///
 /// Most data-modifying operations require obtaining a
-/// [`&mut FastVecData`](FastVecData) via [`FastVec::get`].
+/// [`&mut FastVecData`](FastVecData) via [`FastVec::data`].
 ///
 /// ```
 /// # use fastvec::{FastVec, fast_vec::FastVecData};
 /// let mut vec: FastVec<_> = [1, 2, 3, 4].into();
-/// let data: &mut FastVecData<_,_> = vec.get();
+/// let data: &mut FastVecData<_,_> = vec.data();
 ///
 /// // Use it like a Vec
 /// data.push(5);
@@ -105,7 +104,7 @@ use crate::utils::{IsZST, cold_path};
 /// - [`len`](FastVec::len), [`capacity`](FastVec::capacity), [`is_empty`](FastVec::is_empty);
 ///   they have no additional expenses.
 /// - [`as_slice`](FastVec::as_slice), [`as_mut_slice`](FastVec::as_mut_slice);
-///   they internally call [`get`](FastVec::get) first.
+///   they internally call [`data`](FastVec::data) first.
 ///
 /// ## Trait Implementations
 ///
@@ -133,7 +132,7 @@ use crate::utils::{IsZST, cold_path};
 /// ```
 /// # use fastvec::FastVec;
 /// let mut vec: FastVec<_> = [1, 4, 3, 2].into();
-/// let data = vec.get();
+/// let data = vec.data();
 ///
 /// // All operations reuse the same reference
 /// data.sort();
@@ -191,7 +190,7 @@ use crate::utils::{IsZST, cold_path};
 /// - **[`FastVec`]**: Manages the pointer refresh logic; can be freely moved
 /// - **[`FastVecData`]**: Performs actual data operations; accessed only through borrows
 ///
-/// When you call [`get`](FastVec::get), [`FastVec`]:
+/// When you call [`data`](FastVec::data), [`FastVec`]:
 /// 1. Refreshes the pointer (if data is on stack)
 /// 2. Returns a borrow of [`FastVecData`]
 ///
@@ -333,7 +332,7 @@ impl<T, const N: usize> FastVec<T, N> {
     /// let mut vec: FastVec<i32> = FastVec::new();
     /// assert!(vec.is_empty());
     ///
-    /// vec.get().push(1);
+    /// vec.data().push(1);
     /// assert!(!vec.is_empty());
     /// ```
     #[inline(always)]
@@ -351,7 +350,7 @@ impl<T, const N: usize> FastVec<T, N> {
     /// assert_eq!(vec.capacity(), 8);
     /// assert_eq!(vec.len(), 4);
     ///
-    /// vec.get().extend([1, 2, 3,  4, 5]);
+    /// vec.data().extend([1, 2, 3,  4, 5]);
     /// assert!(vec.capacity() >= 9);
     /// assert_eq!(vec.len(), 9);
     /// ```
@@ -370,7 +369,7 @@ impl<T, const N: usize> FastVec<T, N> {
     /// assert_eq!(vec.capacity(), 8);
     /// assert_eq!(vec.len(), 4);
     ///
-    /// vec.get().extend([1, 2, 3,  4, 5]);
+    /// vec.data().extend([1, 2, 3,  4, 5]);
     /// assert!(vec.capacity() >= 9);
     /// assert_eq!(vec.len(), 9);
     /// ```
@@ -381,6 +380,8 @@ impl<T, const N: usize> FastVec<T, N> {
 
     /// Returns `true` if the data is stored in the stack cache.
     ///
+    /// It's possible that `capacity` or `len` <= `N` but the data is not in stack.
+    ///
     /// # Examples
     ///
     /// ```
@@ -388,7 +389,7 @@ impl<T, const N: usize> FastVec<T, N> {
     /// let mut vec: FastVec<i32, 8> = [1, 2, 3, 4].into();
     /// assert!(vec.in_stack());
     ///
-    /// vec.get().extend([1, 2, 3,  4, 5]);
+    /// vec.data().extend([1, 2, 3,  4, 5]);
     /// assert!(!vec.in_stack());
     /// ```
     #[inline(always)]
@@ -415,7 +416,7 @@ impl<T, const N: usize> FastVec<T, N> {
     /// Refresh the pointer and return a mutable reference to the internal data.
     ///
     /// You can use this mutable reference for methods such as `push`, `pop`, `retain`, and `insert`.
-    /// The pointer is refreshed once in `get`; later method calls reuse it without extra cost.
+    /// The pointer is refreshed once in `data`; later method calls reuse it without extra cost.
     ///
     /// We do not provide a version for obtaining immutable borrowing,
     /// you can use [`as_slice`](FastVec::as_slice) instead.
@@ -425,7 +426,7 @@ impl<T, const N: usize> FastVec<T, N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<i32, 8> = [1, 2, 3, 4].into();
-    /// let v = vec.get();
+    /// let v = vec.data();
     ///
     /// v.push(5);
     /// v.retain(|x| *x % 2 == 1);
@@ -433,7 +434,7 @@ impl<T, const N: usize> FastVec<T, N> {
     /// assert_eq!(vec, [1, 3, 5]);
     /// ```
     #[inline]
-    pub fn get(&mut self) -> &mut FastVecData<T, N> {
+    pub fn data(&mut self) -> &mut FastVecData<T, N> {
         self.refresh();
         &mut self.inner
     }
@@ -586,7 +587,7 @@ impl<T, const N: usize> FastVec<T, N> {
     /// assert_eq!(vec, [1, 2]);
     /// assert!(vec.in_stack());
     ///
-    /// vec.get().extend([3, 4, 5, 6]);
+    /// vec.data().extend([3, 4, 5, 6]);
     /// assert!(!vec.in_stack());
     ///
     /// let vec: FastVec<i32, 8> = vec.force_cast();
@@ -597,8 +598,8 @@ impl<T, const N: usize> FastVec<T, N> {
         if self.inner.in_stack {
             let len = self.inner.len;
             let mut state = <FastVec<T, P>>::with_capacity(len);
-            let dst = state.get();
-            let src = self.get();
+            let dst = state.data();
+            let src = self.data();
             unsafe {
                 if !T::IS_ZST {
                     ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), len);
@@ -610,7 +611,7 @@ impl<T, const N: usize> FastVec<T, N> {
         } else {
             unsafe {
                 let state = <FastVec<T, P>>::from_raw_parts(
-                    self.get().as_mut_ptr(),
+                    self.data().as_mut_ptr(),
                     self.len(),
                     self.capacity(),
                 );
@@ -637,7 +638,7 @@ impl<T, const N: usize> FastVec<T, N> {
     {
         let mut state = Self::with_capacity(num);
         if num > 0 {
-            let vec = state.get();
+            let vec = state.data();
             unsafe {
                 for _ in 1..num {
                     vec.push_unchecked(value.clone());
@@ -662,39 +663,6 @@ impl<T, const N: usize> FastVec<T, N> {
     pub fn from_buf<const P: usize>(values: [T; P]) -> Self {
         Self::from(values)
     }
-
-    /// Move all data to the heap and return a pinned handle.
-    ///
-    /// [`FastVec`] is **not [`Sync`]** (uses [`Cell`](core::cell::Cell)), so shared
-    /// references cannot be sent across threads. If you need cross-thread sharing,
-    /// either use a static value or move the data to the heap first.
-    ///
-    /// In most cases, prefer converting to [`Vec`] via [`FastVec::into_vec`]
-    /// for the simplest, most efficient heap representation.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use fastvec::FastVec;
-    /// # use std::sync::{Arc, RwLock};
-    /// let vec: FastVec<i32, 8> = [1, 4, 3, 2].into();
-    /// let mut pin_box = vec.into_pinned_box();
-    ///
-    /// pin_box.sort();
-    /// pin_box.push(5);
-    /// assert_eq!(*pin_box, [1, 2, 3, 4, 5]);
-    ///
-    /// let arc = Arc::new(RwLock::new(pin_box));
-    /// // Use `arc` across threads...
-    /// ```
-    #[inline]
-    pub fn into_pinned_box(self) -> Pin<Box<FastVecData<T, N>>> {
-        let vec = Box::pin(self.inner);
-        unsafe {
-            vec.refresh();
-        }
-        vec
-    }
 }
 
 impl<T, const N: usize, const P: usize> FastVec<[T; P], N> {
@@ -710,7 +678,7 @@ impl<T, const N: usize, const P: usize> FastVec<[T; P], N> {
     /// ```
     /// # use fastvec::FastVec;
     /// let mut vec: FastVec<_, 2> = [[1, 2, 3], [4, 5, 6], [7, 8, 9]].into();
-    /// assert_eq!(vec.get().pop(), Some([7, 8, 9]));
+    /// assert_eq!(vec.data().pop(), Some([7, 8, 9]));
     /// assert!(!vec.in_stack());
     ///
     /// let mut flattened = vec.into_flattened::<6>();
@@ -718,7 +686,7 @@ impl<T, const N: usize, const P: usize> FastVec<[T; P], N> {
     /// assert!(!flattened.in_stack());
     ///
     /// let mut vec: FastVec<_, 3> = [[1, 2, 3], [4, 5, 6], [7, 8, 9]].into();
-    /// assert_eq!(vec.get().pop(), Some([7, 8, 9]));
+    /// assert_eq!(vec.data().pop(), Some([7, 8, 9]));
     /// assert!(vec.in_stack());
     ///
     /// let mut flattened = vec.into_flattened::<5>();
@@ -758,7 +726,7 @@ impl<T: Clone, const N: usize> Clone for FastVec<T, N> {
     /// ```
     fn clone(&self) -> Self {
         let mut vec = Self::with_capacity(self.len());
-        let dst = vec.get();
+        let dst = vec.data();
         for item in self.as_slice() {
             unsafe {
                 dst.push_unchecked(item.clone());
@@ -781,7 +749,7 @@ impl<T: Clone, const N: usize> Clone for FastVec<T, N> {
     /// assert_eq!(vec, vec2);
     /// ```
     fn clone_from(&mut self, source: &Self) {
-        let dst = self.get();
+        let dst = self.data();
         dst.clear();
         dst.reserve(source.len());
 
@@ -805,7 +773,7 @@ impl<T: Clone, const N: usize> From<&[T]> for FastVec<T, N> {
     /// ```
     fn from(value: &[T]) -> Self {
         let mut res = Self::with_capacity(value.len());
-        let vec = res.get();
+        let vec = res.data();
         for items in value {
             unsafe {
                 vec.push_unchecked(items.clone());
@@ -826,7 +794,7 @@ impl<T: Clone, const N: usize, const P: usize> From<&[T; P]> for FastVec<T, N> {
     /// ```
     fn from(value: &[T; P]) -> Self {
         let mut res = Self::with_capacity(value.len());
-        let vec = res.get();
+        let vec = res.data();
         for items in value {
             unsafe {
                 vec.push_unchecked(items.clone());
@@ -861,7 +829,7 @@ impl<T, const N: usize, const P: usize> From<[T; P]> for FastVec<T, N> {
     /// ```
     fn from(value: [T; P]) -> Self {
         let mut vec = Self::with_capacity(P);
-        let vec_mut = vec.get();
+        let vec_mut = vec.data();
         unsafe {
             ptr::copy_nonoverlapping(value.as_ptr(), vec_mut.as_mut_ptr(), P);
             vec_mut.len = P;
@@ -928,7 +896,7 @@ impl<T, const N: usize, const P: usize> From<crate::StackVec<T, P>> for FastVec<
     fn from(mut value: crate::StackVec<T, P>) -> Self {
         let len = value.len();
         let mut vec = Self::with_capacity(len);
-        let vec_mut = vec.get();
+        let vec_mut = vec.data();
         unsafe {
             ptr::copy_nonoverlapping(value.as_ptr(), vec_mut.as_mut_ptr(), len);
             vec_mut.len = len;
@@ -970,7 +938,7 @@ impl<T, const N: usize> FromIterator<T> for FastVec<T, N> {
         let iter = iter.into_iter();
         let (hint, _) = iter.size_hint();
         let mut res = Self::with_capacity(hint);
-        let vec = res.get();
+        let vec = res.data();
         for item in iter {
             vec.push(item);
         }
