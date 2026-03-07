@@ -740,7 +740,7 @@ impl<T, const N: usize> AutoVec<T, N> {
     pub fn push(&mut self, value: T) {
         match &mut self.0 {
             InnerVec::Stack(vec) => {
-                if vec.len < N {
+                if vec.len() < N {
                     // SAFETY: len < N
                     unsafe { vec.push_unchecked(value) };
                 } else {
@@ -842,7 +842,8 @@ impl<T, const N: usize> AutoVec<T, N> {
         match &mut self.0 {
             InnerVec::Stack(vec) => {
                 if vec.len() + other.len() > N {
-                    let mut vec = vec.into_vec_with_capacity(vec.len() + other.len());
+                    let mut vec =
+                        unsafe { vec.into_vec_with_capacity_unchecked(vec.len() + other.len()) };
                     other.append_to_vec(&mut vec);
                     self.0 = InnerVec::Heap(vec);
                 } else {
@@ -861,7 +862,8 @@ impl<T, const N: usize> AutoVec<T, N> {
         match &mut self.0 {
             InnerVec::Stack(vec) => {
                 if vec.len() + other.len() > N {
-                    let mut vec = vec.into_vec_with_capacity(vec.len() + other.len());
+                    let mut vec =
+                        unsafe { vec.into_vec_with_capacity_unchecked(vec.len() + other.len()) };
                     vec.append(other);
                     self.0 = InnerVec::Heap(vec);
                 } else {

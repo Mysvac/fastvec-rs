@@ -114,9 +114,3 @@ When enabled, `StackVec`, `FastVec` and `AutoVec` implement
 ### std
 
 When enabled, `StackVec`, `FastVec` and `AutoVec` implement `std::io::Write` .
-
-### nightly
-
-Available only on Nightly.
-
-When enabled, the `cold_path` feature is used to optimize branch prediction.

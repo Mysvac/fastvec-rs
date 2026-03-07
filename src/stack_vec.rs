@@ -405,23 +405,6 @@ impl<T, const N: usize> StackVec<T, N> {
 
     /// Converts a [`StackVec`] to a [`Vec`] with the specified capacity.
     ///
-    /// If the specified capacity is less than the length,
-    /// the length will be used instead of the specified value.
-    #[inline]
-    pub fn into_vec_with_capacity(&mut self, capacity: usize) -> Vec<T> {
-        let mut vec: Vec<T> = Vec::with_capacity(capacity.max(self.len));
-
-        unsafe {
-            ptr::copy_nonoverlapping(self.as_ptr(), vec.as_mut_ptr(), self.len);
-            vec.set_len(self.len);
-            self.len = 0;
-        }
-
-        vec
-    }
-
-    /// Converts a [`StackVec`] to a [`Vec`] with the specified capacity.
-    ///
     /// # Safety
     /// The caller must ensure `len <= capacity`.
     #[inline(always)]

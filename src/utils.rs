@@ -1,9 +1,6 @@
-/// See [`core::hint::cold_path`](https://doc.rust-lang.org/beta/core/hint) .
-#[cfg(feature = "nightly")]
-pub(crate) use core::hint::cold_path;
-
-/// See [`core::hint::cold_path`](https://doc.rust-lang.org/beta/core/hint) .
-#[cfg(not(feature = "nightly"))]
+/// An alternative to `core::hint::cold_path`,
+/// used for optimizing branch prediction.
+#[cold]
 #[inline(always)]
 pub(crate) const fn cold_path() {}
 
@@ -13,8 +10,7 @@ pub(crate) trait IsZST {
 
 #[inline(always)]
 pub(crate) const unsafe fn zst_init<T>() -> T {
-    // assert!(core::mem::size_of::<T>() == 0);
-
+    // const { assert!(core::mem::size_of::<T>() == 0); }
     #[allow(clippy::uninit_assumed_init)]
     unsafe {
         core::mem::MaybeUninit::uninit().assume_init()

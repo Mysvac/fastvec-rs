@@ -1,6 +1,6 @@
 [package]
 name = "fastvec"
-version = "1.1.0"
+version = "2.0.0"
 edition = "2024"
 keywords = ["small", "vec", "stack", "no_std", "fastvec"]
 license = "MIT OR Apache-2.0"
@@ -14,8 +14,6 @@ exclude = ["benchmark", ".github"]
 [features]
 
 std = []
-
-nightly = []
 
 serde = [
     "dep:serde_core"

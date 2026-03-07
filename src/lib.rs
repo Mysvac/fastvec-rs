@@ -136,8 +136,11 @@
 //! - 1.1.0
 //!     - Replace `FastVec::get` with `FastVec::data`.
 //!     - Delete `FastVec::into_pinned_box`.
+//! - 2.0.0
+//!     - Implement `cold_path` through `#[cold]`.
+//!     - Delete `nightly` feature
+//!     - TODO: Adjusting the internal implementation of `AutoVec`.
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(feature = "nightly", feature(cold_path))]
 #![no_std]
 
 extern crate alloc;
