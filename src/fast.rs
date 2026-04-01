@@ -12,6 +12,8 @@ use core::panic::{RefUnwindSafe, UnwindSafe};
 use core::ptr::NonNull;
 use core::{ptr, slice};
 
+use crate::utils::min_cap;
+
 use super::utils::{IsZST, split_range_bound};
 
 const MAX_CAP: usize = usize::MAX >> 1;
@@ -532,7 +534,7 @@ impl<T, const N: usize> FastVecData<T, N> {
         let len = self.len();
         let target = len.saturating_add(additional);
         if target > cap {
-            self.realloc(target.min(MARKER).next_power_of_two());
+            self.realloc(min_cap::<T>().max(target).min(MARKER).next_power_of_two());
         }
     }
 
@@ -1485,9 +1487,8 @@ impl<T: Debug, F: FnMut(&mut T) -> bool, const N: usize> Debug for ExtractIf<'_,
 /// An inline-buffer-prioritized vector that automatically spills to the heap
 /// when capacity is exceeded.
 ///
-/// Unlike [`SmallVec`](crate::vec::SmallVec), [`FastVec`] uses
-/// **pointer caching** to avoid conditional checks on every operation,
-/// achieving higher performance.
+/// Unlike [`SmallVec`](crate::SmallVec), [`FastVec`] uses  **pointer caching**
+/// to avoid conditional checks on every operation, achieving higher performance.
 ///
 /// When the data is in the inline buffer, the execution efficiency is
 /// almost the same as `[T; N]`. Even if switching to the heap, it
@@ -1579,7 +1580,7 @@ impl<T: Debug, F: FnMut(&mut T) -> bool, const N: usize> Debug for ExtractIf<'_,
 /// ## Trait Implementations
 ///
 /// [`FastVec`] implements [`Deref`](core::ops::Deref), [`Index`](core::ops::Index),
-/// [`Debug`](core::fmt::Debug), etc., via [`as_slice`](FastVec::as_slice) and
+/// [`Debug`], etc., via [`as_slice`](FastVec::as_slice) and
 /// [`as_mut_slice`](FastVec::as_mut_slice):
 ///
 /// ```

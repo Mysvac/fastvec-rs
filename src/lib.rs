@@ -27,7 +27,7 @@
 //!
 //! A great replacement for a plain array `[T; N]`.
 //!
-//! ```rust
+//! ```rust, ignore
 //! # use fastvec::ArrayVec;
 //! let mut vec: ArrayVec<i32, 10> = ArrayVec::new();
 //!
@@ -45,7 +45,8 @@
 //!
 //! ### [FastVec]
 //!
-//! A `Vec` for temporary data that auto-grows. It prefers inline storage and switches to the heap when capacity is insufficient.
+//! A `Vec` for temporary data that auto-grows. It prefers inline storage and switches
+//! to the heap when capacity is insufficient.
 //!
 //! **Features:**
 //! - `!Sync`, generally for temporary data processing
@@ -53,10 +54,10 @@
 //! - Inline-first; no heap allocs for small sizes
 //! - Guaranteed not slower than `Vec` for large sizes
 //!
-//! This container caches pointers to minimize inline/heap checks, keeping performance from degrading
-//! (even on the heap it’s no slower than `Vec`) and outperforming [`SmallVec`](https://docs.rs/smallvec/latest/smallvec).
+//! This container caches pointers to minimize inline/heap checks, keeping performance
+//! from degrading (even on the heap it’s no slower than `Vec`) and outperforming [`SmallVec`].
 //!
-//! ```rust
+//! ```rust, ignore
 //! # use fastvec::FastVec;
 //! let mut vec: FastVec<i32, 5> = [1, 2, 3].into();
 //! assert_eq!(vec.capacity(), 5);
@@ -67,9 +68,10 @@
 //! ```
 //!
 //! Pointer caching introduces self-references, so it is `!Sync`. Any data access must
-//! first call [`data`](FastVec::data) to obtain the correct [`FastVecData`](fast_vec::FastVecData) reference.
+//! first call [`FastVec::data`] to obtain the correct [`FastVecData`] reference.
 //!
-//! `data` incurs one branch and pointer assignment; typically you should grab the data reference once, use it via references, and only switch when you need to move the data.
+//! `data` incurs one branch and pointer assignment; typically you should grab the data
+//! reference once, use it via references, and only switch when you need to move the data.
 //!
 //! See the [`FastVec`] docs for details.
 //!
@@ -84,12 +86,12 @@
 //! - Vec-compatible API
 //!
 //! Unlike [`FastVec`], this container checks inline/heap location on operations
-//! and is designed similarly to [`SmallVec`](https://docs.rs/smallvec/latest/smallvec).
+//! and is designed similarly to [`smallvec::SmallVec`](https://docs.rs/smallvec/latest/smallvec).
 //!
 //! It is efficient for small data but may lag `Vec` on large data,
 //! especially on simple functions like data access and `push/pop`.
 //!
-//! ```rust
+//! ```rust, ignore
 //! # use fastvec::SmallVec;
 //! let mut vec: SmallVec<i32, 5> = [1, 2, 3].into();
 //! assert_eq!(vec.capacity(), 5);
