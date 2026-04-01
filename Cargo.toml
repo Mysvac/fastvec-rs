@@ -2,16 +2,26 @@
 name = "fastvec"
 version = "2.0.0"
 edition = "2024"
-keywords = ["small", "vec", "stack", "no_std", "fastvec"]
+keywords = ["SBO", "Vec", "SmallVec", "ArrayVec", "FastVec", "no_std"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 documentation = "https://docs.rs/fastvec"
 repository = "https://github.com/Mysvac/fastvec-rs"
-description = "A high-performance vector crate tuned for small data sizes."
-rust-version = "1.88.0"
-exclude = ["benchmark", ".github"]
+description = "A high-performance SBO vector crate."
+rust-version = "1.93.0"
+exclude = ["benchmark", ".github", "README_ZH.md"]
 
 [features]
+
+default = [
+    "fastvec",
+    "arrayvec",
+    "smallvec",
+]
+
+fastvec = []
+arrayvec = []
+smallvec = []
 
 std = []
 

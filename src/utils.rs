@@ -1,20 +1,27 @@
-/// An alternative to `core::hint::cold_path`,
-/// used for optimizing branch prediction.
-#[cold]
-#[inline(always)]
-pub(crate) const fn cold_path() {}
+//! Internal helpers shared by vector implementations.
 
-pub(crate) trait IsZST {
-    const IS_ZST: bool;
-}
-
+/// Creates an initialized value for a zero-sized type.
+///
+/// # Safety
+///
+/// `T` must be a zero-sized type.
 #[inline(always)]
-pub(crate) const unsafe fn zst_init<T>() -> T {
-    // const { assert!(core::mem::size_of::<T>() == 0); }
-    #[allow(clippy::uninit_assumed_init)]
+pub(super) const unsafe fn zst_init<T>() -> T {
+    debug_assert!(::core::mem::size_of::<T>() == 0);
+
+    #[expect(clippy::uninit_assumed_init)]
     unsafe {
         core::mem::MaybeUninit::uninit().assume_init()
     }
+}
+
+#[cold]
+#[inline(never)]
+pub(super) const fn cold_path() {}
+
+/// Compile-time flag for whether a type is zero-sized.
+pub(super) trait IsZST {
+    const IS_ZST: bool;
 }
 
 impl<T> IsZST for T {
@@ -23,13 +30,13 @@ impl<T> IsZST for T {
     /// This will be optimized by the compiler and will not take up additional space.
     ///
     /// Don't worry about the additional overhead of branching statements.
-    const IS_ZST: bool = core::mem::size_of::<T>() == 0;
+    const IS_ZST: bool = ::core::mem::size_of::<T>() == 0;
 }
 
-/// choose min non-zero capacity for type T
+/// Chooses a minimum non-zero capacity heuristic for type `T`.
 #[inline(always)]
-pub(crate) const fn min_cap<T>() -> usize {
-    let size = core::mem::size_of::<T>();
+pub(super) const fn min_cap<T>() -> usize {
+    let size = ::core::mem::size_of::<T>();
     if size < 1 {
         8
     } else if size <= 1024 {
@@ -39,8 +46,13 @@ pub(crate) const fn min_cap<T>() -> usize {
     }
 }
 
+/// Converts generic range bounds into normalized `(start, end)` indices.
+///
+/// # Panics
+///
+/// Panics if `start > end` or `end > len`.
 #[inline(never)]
-pub(crate) fn split_range_bound(
+pub(super) fn split_range_bound(
     src: &impl core::ops::RangeBounds<usize>,
     len: usize,
 ) -> (usize, usize) {
@@ -61,7 +73,7 @@ pub(crate) fn split_range_bound(
     (start, end)
 }
 
-macro_rules! impl_commen_traits {
+macro_rules! impl_common_traits {
     ($name:ty) => {
         impl<T, const N: usize> core::ops::Deref for $name {
             type Target = [T];
@@ -112,14 +124,14 @@ macro_rules! impl_commen_traits {
             }
         }
 
-        impl<T, const N: usize> alloc::borrow::Borrow<[T]> for $name {
+        impl<T, const N: usize> core::borrow::Borrow<[T]> for $name {
             #[inline]
             fn borrow(&self) -> &[T] {
                 self.as_slice()
             }
         }
 
-        impl<T, const N: usize> alloc::borrow::BorrowMut<[T]> for $name {
+        impl<T, const N: usize> core::borrow::BorrowMut<[T]> for $name {
             #[inline]
             fn borrow_mut(&mut self) -> &mut [T] {
                 self.as_mut_slice()
@@ -182,6 +194,16 @@ macro_rules! impl_commen_traits {
 
         impl<T: Eq, const N: usize> Eq for $name {}
 
+        impl<T, U, const N: usize> core::cmp::PartialEq<[U]> for $name
+        where
+            T: core::cmp::PartialEq<U>,
+        {
+            #[inline]
+            fn eq(&self, other: &[U]) -> bool {
+                core::cmp::PartialEq::eq(self.as_slice(), other)
+            }
+        }
+
         impl<T, U, const N: usize> core::cmp::PartialEq<&[U]> for $name
         where
             T: core::cmp::PartialEq<U>,
@@ -202,26 +224,6 @@ macro_rules! impl_commen_traits {
             }
         }
 
-        impl<T, U, const N: usize, const P: usize> core::cmp::PartialEq<&[U; P]> for $name
-        where
-            T: core::cmp::PartialEq<U>,
-        {
-            #[inline]
-            fn eq(&self, other: &&[U; P]) -> bool {
-                core::cmp::PartialEq::eq(self.as_slice(), other.as_slice())
-            }
-        }
-
-        impl<T, U, const N: usize> core::cmp::PartialEq<[U]> for $name
-        where
-            T: core::cmp::PartialEq<U>,
-        {
-            #[inline]
-            fn eq(&self, other: &[U]) -> bool {
-                core::cmp::PartialEq::eq(self.as_slice(), other)
-            }
-        }
-
         impl<T, U, const N: usize, const P: usize> core::cmp::PartialEq<[U; P]> for $name
         where
             T: core::cmp::PartialEq<U>,
@@ -231,7 +233,17 @@ macro_rules! impl_commen_traits {
                 core::cmp::PartialEq::eq(self.as_slice(), other.as_slice())
             }
         }
+
+        impl<T, U, const N: usize, const P: usize> core::cmp::PartialEq<&[U; P]> for $name
+        where
+            T: core::cmp::PartialEq<U>,
+        {
+            #[inline]
+            fn eq(&self, other: &&[U; P]) -> bool {
+                core::cmp::PartialEq::eq(self.as_slice(), other.as_slice())
+            }
+        }
     };
 }
 
-pub(crate) use impl_commen_traits;
+pub(super) use impl_common_traits;

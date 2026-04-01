@@ -2,9 +2,8 @@
 
 use core::hint;
 use criterion::{Bencher, Criterion, criterion_group, criterion_main};
-use fastvec::{AutoVec, FastVec, StackVec, fast_vec::FastVecData};
-use smallvec::SmallVec;
-use std::sync::OnceLock;
+use fastvec::{SmallVec, FastVec, ArrayVec, FastVecData};
+use std::sync::{Arc, OnceLock};
 
 use rand::Rng;
 
@@ -38,12 +37,12 @@ static SMALL_BOUND: OnceLock<usize> = OnceLock::new();
 /// This is reasonable, as scenarios using vectors usually do not know the amount of data.
 static LARGE_BOUND: OnceLock<usize> = OnceLock::new();
 
-static SMALL_DATA: OnceLock<Box<[u64]>> = OnceLock::new();
+static SMALL_DATA: OnceLock<Arc<[u64]>> = OnceLock::new();
 static SMALL_INDEX: OnceLock<usize> = OnceLock::new();
-static LARGE_DATA: OnceLock<Box<[u64]>> = OnceLock::new();
-static LARGE_INDEX: OnceLock<Box<[u64]>> = OnceLock::new();
-static SMALL_RANGE: OnceLock<Box<[u64]>> = OnceLock::new();
-static LARGE_RANGE: OnceLock<Box<[u64]>> = OnceLock::new();
+static LARGE_DATA: OnceLock<Arc<[u64]>> = OnceLock::new();
+static LARGE_INDEX: OnceLock<Arc<[usize]>> = OnceLock::new();
+static SMALL_RANGE: OnceLock<Arc<[usize]>> = OnceLock::new();
+static LARGE_RANGE: OnceLock<Arc<[usize]>> = OnceLock::new();
 
 /// Generate an array of random content of a specified length.
 ///
@@ -54,13 +53,23 @@ static LARGE_RANGE: OnceLock<Box<[u64]>> = OnceLock::new();
 /// a large amount of code will be deleted due to compile time optimization,
 /// resulting in completely different test results from actual results.
 #[inline(never)]
-fn gen_rand(len: usize, start: u64, end: u64) -> Box<[u64]> {
+fn gen_rand(len: usize, start: u64, end: u64) -> Arc<[u64]> {
     let mut rng = rand::rng();
     let mut vec: Vec<u64> = Vec::with_capacity(len);
     for _ in 0..len {
         vec.push(rng.random_range(start..end));
     }
-    vec.into_boxed_slice()
+    vec.into()
+}
+
+#[inline(never)]
+fn gen_rand_usize(len: usize, start: usize, end: usize) -> Arc<[usize]> {
+    let mut rng = rand::rng();
+    let mut vec: Vec<usize> = Vec::with_capacity(len);
+    for _ in 0..len {
+        vec.push(rng.random_range(start..end));
+    }
+    vec.into()
 }
 
 /// An initialization tool for vector like type.
@@ -80,8 +89,6 @@ trait VecLike {
 trait Accessor<'a> {
     fn push(&mut self, value: u64);
     fn pop(&mut self) -> Option<u64>;
-    fn insert(&mut self, index: usize, value: u64);
-    fn remove(&mut self, index: usize) -> u64;
     fn get_mut(&mut self, index: usize) -> &mut u64;
     /// Used for quickly setting vector contents during testing.
     ///
@@ -99,14 +106,6 @@ macro_rules! impl_accessor {
             #[inline(always)]
             fn pop(&mut self) -> Option<u64> {
                 (*self).pop()
-            }
-            #[inline(always)]
-            fn insert(&mut self, index: usize, value: u64) {
-                (*self).insert(index, value);
-            }
-            #[inline(always)]
-            fn remove(&mut self, index: usize) -> u64 {
-                (*self).remove(index)
             }
             #[inline(always)]
             fn get_mut(&mut self, index: usize) -> &mut u64 {
@@ -143,7 +142,7 @@ impl VecLike for Vec<u64> {
 
 impl_accessor!(Vec<u64>);
 
-impl VecLike for StackVec<u64, SMALL_SIZE> {
+impl VecLike for ArrayVec<u64, SMALL_SIZE> {
     #[inline(always)]
     fn new_empty() -> Self {
         Self::new()
@@ -162,28 +161,7 @@ impl VecLike for StackVec<u64, SMALL_SIZE> {
     }
 }
 
-impl_accessor!(StackVec<u64, SMALL_SIZE>);
-
-impl VecLike for AutoVec<u64, SMALL_SIZE> {
-    #[inline(always)]
-    fn new_empty() -> Self {
-        Self::new()
-    }
-    #[inline(always)]
-    fn new_small() -> Self {
-        Self::with_capacity(SMALL_SIZE)
-    }
-    #[inline(always)]
-    fn new_large() -> Self {
-        Self::with_capacity(LARGE_SIZE)
-    }
-    #[inline(always)]
-    fn accessor(&mut self) -> impl Accessor<'_> {
-        self
-    }
-}
-
-impl_accessor!(AutoVec<u64, SMALL_SIZE>);
+impl_accessor!(ArrayVec<u64, SMALL_SIZE>);
 
 impl VecLike for SmallVec<u64, SMALL_SIZE> {
     #[inline(always)]
@@ -205,6 +183,27 @@ impl VecLike for SmallVec<u64, SMALL_SIZE> {
 }
 
 impl_accessor!(SmallVec<u64, SMALL_SIZE>);
+
+impl VecLike for smallvec::SmallVec<u64, SMALL_SIZE> {
+    #[inline(always)]
+    fn new_empty() -> Self {
+        Self::new()
+    }
+    #[inline(always)]
+    fn new_small() -> Self {
+        Self::with_capacity(SMALL_SIZE)
+    }
+    #[inline(always)]
+    fn new_large() -> Self {
+        Self::with_capacity(LARGE_SIZE)
+    }
+    #[inline(always)]
+    fn accessor(&mut self) -> impl Accessor<'_> {
+        self
+    }
+}
+
+impl_accessor!(smallvec::SmallVec<u64, SMALL_SIZE>);
 
 /// This is a normal usage test for [`FastVec`].
 ///
@@ -267,14 +266,6 @@ impl<'a> Accessor<'a> for &'a mut FastVec<u64, SMALL_SIZE_1> {
         (*self).data().pop()
     }
     #[inline(always)]
-    fn insert(&mut self, index: usize, value: u64) {
-        (*self).data().insert(index, value);
-    }
-    #[inline(always)]
-    fn remove(&mut self, index: usize) -> u64 {
-        (*self).data().remove(index)
-    }
-    #[inline(always)]
     fn get_mut(&mut self, index: usize) -> &mut u64 {
         &mut (*self).data()[index]
     }
@@ -287,26 +278,23 @@ impl<'a> Accessor<'a> for &'a mut FastVec<u64, SMALL_SIZE_1> {
 }
 
 macro_rules! gen_bench_group {
-    (ExcludeStackVec, $c:ident => $fn_name:ident) => {{
+    (ExcludeArrayVec, $c:ident => $fn_name:ident) => {{
         let mut group_new = $c.benchmark_group(stringify!($fn_name));
         group_new.bench_function("Vec", |b| $fn_name::<Vec<u64>>(b));
-        group_new.bench_function("FastVec", |b| $fn_name::<FastVec<u64, SMALL_SIZE>>(b));
-        group_new.bench_function("AutoVec", |b| $fn_name::<AutoVec<u64, SMALL_SIZE>>(b));
-        group_new.bench_function("SmallVec", |b| $fn_name::<SmallVec<u64, SMALL_SIZE>>(b));
-        group_new.bench_function("FastVec_Direct", |b| {
-            $fn_name::<FastVec<u64, SMALL_SIZE_1>>(b)
-        });
+        group_new.bench_function("FastVec", |b| $fn_name::<FastVec<u64, SMALL_SIZE_1>>(b));
+        group_new.bench_function("FastVecData", |b| $fn_name::<FastVec<u64, SMALL_SIZE>>(b));
+        group_new.bench_function("fastvec::SmallVec", |b| $fn_name::<SmallVec<u64, SMALL_SIZE>>(b));
+        group_new.bench_function("smallvec::SmallVec", |b| $fn_name::<smallvec::SmallVec<u64, SMALL_SIZE>>(b));
+
     }};
-    (IncludeStackVec, $c:ident => $fn_name:ident) => {{
+    (IncludeArrayVec, $c:ident => $fn_name:ident) => {{
         let mut group_new = $c.benchmark_group(stringify!($fn_name));
         group_new.bench_function("Vec", |b| $fn_name::<Vec<u64>>(b));
-        group_new.bench_function("FastVec", |b| $fn_name::<FastVec<u64, SMALL_SIZE>>(b));
-        group_new.bench_function("StackVec", |b| $fn_name::<StackVec<u64, SMALL_SIZE>>(b));
-        group_new.bench_function("AutoVec", |b| $fn_name::<AutoVec<u64, SMALL_SIZE>>(b));
-        group_new.bench_function("SmallVec", |b| $fn_name::<SmallVec<u64, SMALL_SIZE>>(b));
-        group_new.bench_function("FastVec_Direct", |b| {
-            $fn_name::<FastVec<u64, SMALL_SIZE_1>>(b)
-        });
+        group_new.bench_function("ArrayVec", |b| $fn_name::<ArrayVec<u64, SMALL_SIZE>>(b));
+        group_new.bench_function("FastVec", |b| $fn_name::<FastVec<u64, SMALL_SIZE_1>>(b));
+        group_new.bench_function("FastVecData", |b| $fn_name::<FastVec<u64, SMALL_SIZE>>(b));
+        group_new.bench_function("fastvec::SmallVec", |b| $fn_name::<SmallVec<u64, SMALL_SIZE>>(b));
+        group_new.bench_function("smallvec::SmallVec", |b| $fn_name::<smallvec::SmallVec<u64, SMALL_SIZE>>(b));
     }};
 }
 
@@ -317,28 +305,24 @@ fn bench_vec(c: &mut Criterion) {
     SMALL_INDEX.get_or_init(|| gen_one(0, *SMALL_BOUND.get().unwrap()));
     LARGE_DATA.get_or_init(|| gen_rand(*LARGE_BOUND.get().unwrap(), 0, 9999));
     LARGE_INDEX.get_or_init(|| {
-        gen_rand(
+        gen_rand_usize(
             *SMALL_BOUND.get().unwrap(),
             0,
-            *LARGE_BOUND.get().unwrap() as _,
+            *LARGE_BOUND.get().unwrap(),
         )
     });
-    SMALL_RANGE.get_or_init(|| gen_rand(*SMALL_BOUND.get().unwrap() + 30, 0, 16));
-    LARGE_RANGE.get_or_init(|| gen_rand(*LARGE_BOUND.get().unwrap() >> 3, 0, 36000));
-    gen_bench_group!(IncludeStackVec, c => new_empty);
-    gen_bench_group!(IncludeStackVec, c => new_small);
-    gen_bench_group!(IncludeStackVec, c => push_small);
-    gen_bench_group!(IncludeStackVec, c => push_small_from_empty);
-    gen_bench_group!(ExcludeStackVec, c => push_large);
-    gen_bench_group!(ExcludeStackVec, c => push_large_from_empty);
-    gen_bench_group!(IncludeStackVec, c => pop_small);
-    gen_bench_group!(ExcludeStackVec, c => pop_large);
-    gen_bench_group!(IncludeStackVec, c => insert_small);
-    gen_bench_group!(ExcludeStackVec, c => insert_large);
-    gen_bench_group!(IncludeStackVec, c => remove_small);
-    gen_bench_group!(ExcludeStackVec, c => remove_large);
-    gen_bench_group!(IncludeStackVec, c => index_small);
-    gen_bench_group!(ExcludeStackVec, c => index_large);
+    SMALL_RANGE.get_or_init(|| gen_rand_usize(*SMALL_BOUND.get().unwrap() + 30, 0, 16));
+    LARGE_RANGE.get_or_init(|| gen_rand_usize(*LARGE_BOUND.get().unwrap() >> 3, 0, 36000));
+    // gen_bench_group!(IncludeArrayVec, c => new_empty);
+    gen_bench_group!(IncludeArrayVec, c => new_small);
+    gen_bench_group!(IncludeArrayVec, c => push_small);
+    gen_bench_group!(IncludeArrayVec, c => push_small_from_empty);
+    // gen_bench_group!(ExcludeArrayVec, c => push_large);
+    // gen_bench_group!(ExcludeArrayVec, c => push_large_from_empty);
+    gen_bench_group!(IncludeArrayVec, c => pop_small);
+    // gen_bench_group!(ExcludeArrayVec, c => pop_large);
+    gen_bench_group!(IncludeArrayVec, c => index_small);
+    gen_bench_group!(ExcludeArrayVec, c => index_large);
 }
 
 /// Test The creation time of empty vector.
@@ -364,7 +348,8 @@ fn new_small<T: VecLike>(b: &mut Bencher) {
 #[inline(never)]
 fn push_small<T: VecLike>(b: &mut Bencher) {
     let mut vec = T::new_small();
-    let data = SMALL_DATA.get().unwrap().clone();
+    let data = SMALL_DATA.get().unwrap();
+    let slice: &[u64] = data;
     let index = *SMALL_INDEX.get().unwrap();
 
     b.iter(|| {
@@ -372,7 +357,7 @@ fn push_small<T: VecLike>(b: &mut Bencher) {
         // Randomly collect internal data to avoid
         // compiler optimization of these non output codes.
         let mut counter = 0u64;
-        for item in &data {
+        for item in slice {
             op.push(*item);
         }
         counter += *op.get_mut(index);
@@ -387,7 +372,8 @@ fn push_small<T: VecLike>(b: &mut Bencher) {
 /// The data volume is 14-15.
 #[inline(never)]
 fn push_small_from_empty<T: VecLike>(b: &mut Bencher) {
-    let data = SMALL_DATA.get().unwrap().clone();
+    let data = SMALL_DATA.get().unwrap();
+    let slice: &[u64] = data;
     let index = *SMALL_INDEX.get().unwrap();
 
     b.iter(|| {
@@ -396,7 +382,7 @@ fn push_small_from_empty<T: VecLike>(b: &mut Bencher) {
         // Randomly collect internal data to avoid
         // compiler optimization of these non output codes.
         let mut counter = 0u64;
-        for item in &data {
+        for item in slice {
             op.push(*item);
         }
         counter += *op.get_mut(index);
@@ -411,19 +397,21 @@ fn push_small_from_empty<T: VecLike>(b: &mut Bencher) {
 #[inline(never)]
 fn push_large<T: VecLike>(b: &mut Bencher) {
     let mut vec = T::new_large();
-    let data = LARGE_DATA.get().unwrap().clone();
-    let index = LARGE_INDEX.get().unwrap().clone();
+    let data = LARGE_DATA.get().unwrap();
+    let slice1: &[u64] = data;
+    let index = LARGE_INDEX.get().unwrap();
+    let slice2: &[usize] = index;
 
     b.iter(|| {
         let mut op = vec.accessor();
         // Randomly collect internal data to avoid
         // compiler optimization of these non output codes.
         let mut counter = 0u64;
-        for item in &data {
+        for item in slice1 {
             op.push(*item);
         }
-        for item in &index {
-            counter += *op.get_mut(*item as usize);
+        for item in slice2 {
+            counter += *op.get_mut(*item);
         }
         op.set_len(0);
         hint::black_box(counter)
@@ -436,8 +424,10 @@ fn push_large<T: VecLike>(b: &mut Bencher) {
 /// The data volume is 36000-36002.
 #[inline(never)]
 fn push_large_from_empty<T: VecLike>(b: &mut Bencher) {
-    let data = LARGE_DATA.get().unwrap().clone();
-    let index = LARGE_INDEX.get().unwrap().clone();
+    let data = LARGE_DATA.get().unwrap();
+    let slice1: &[u64] = data;
+    let index = LARGE_INDEX.get().unwrap();
+    let slice2: &[usize] = index;
 
     b.iter(|| {
         let mut vec = T::new_empty();
@@ -445,11 +435,11 @@ fn push_large_from_empty<T: VecLike>(b: &mut Bencher) {
         // Randomly collect internal data to avoid
         // compiler optimization of these non output codes.
         let mut counter = 0u64;
-        for item in &data {
+        for item in slice1 {
             op.push(*item);
         }
-        for item in &index {
-            counter += *op.get_mut(*item as usize);
+        for item in slice2 {
+            counter += *op.get_mut(*item);
         }
         op.set_len(0);
         hint::black_box(counter)
@@ -503,102 +493,6 @@ fn pop_large<T: VecLike>(b: &mut Bencher) {
     op.set_len(0);
 }
 
-/// Test `insert` efficient, will not reallocate memory.
-///
-/// The data volume is 36000-36002.
-#[inline(never)]
-fn insert_small<T: VecLike>(b: &mut Bencher) {
-    let mut vec = T::new_small();
-
-    let mut op = vec.accessor();
-    let num = *SMALL_BOUND.get().unwrap();
-    let index = gen_one(0, 16);
-
-    b.iter(|| {
-        let mut counter = 0u64;
-        op.set_len(12);
-        op.insert({ num + 4 } % 12, 6);
-        op.insert({ num + 7 } % 13, 7);
-        op.insert({ num + 9 } % 14, 8);
-        op.insert({ num + 14 } % 15, 11);
-        counter += *op.get_mut(hint::black_box(index));
-        hint::black_box(counter)
-    });
-    op.set_len(0);
-}
-
-/// Test `insert` efficient, will not reallocate memory.
-///
-/// The data volume is 36000-36002.
-#[inline(never)]
-fn insert_large<T: VecLike>(b: &mut Bencher) {
-    let mut vec = T::new_large();
-
-    let mut op = vec.accessor();
-    let num = *LARGE_BOUND.get().unwrap();
-    let index = gen_one(0, 36004);
-
-    b.iter(|| {
-        let mut counter = 0u64;
-        op.set_len(36000);
-        op.insert(num % 12 + 35000, 6);
-        op.insert(num % 20 + 20000, 7);
-        op.insert(num % 16 + 10000, 8);
-        op.insert(num % 13, 11);
-        counter += *op.get_mut(hint::black_box(index));
-        hint::black_box(counter)
-    });
-    op.set_len(0);
-}
-
-/// Test `remove` efficient, will not reallocate memory.
-///
-/// The data volume is 14-15.
-#[inline(never)]
-fn remove_small<T: VecLike>(b: &mut Bencher) {
-    let mut vec = T::new_small();
-
-    let mut op = vec.accessor();
-    let num = *SMALL_BOUND.get().unwrap();
-    let index = gen_one(0, 12);
-
-    b.iter(|| {
-        let mut counter = 0u64;
-        op.set_len(16);
-        op.remove({ num + 14 } % 15);
-        op.remove({ num + 9 } % 14);
-        op.remove({ num + 7 } % 13);
-        op.remove({ num + 4 } % 12);
-        counter += *op.get_mut(hint::black_box(index));
-        hint::black_box(counter)
-    });
-    op.set_len(0);
-}
-
-/// Test `insert` efficient, will not reallocate memory.
-///
-/// The data volume is 36000-36002.
-#[inline(never)]
-fn remove_large<T: VecLike>(b: &mut Bencher) {
-    let mut vec = T::new_large();
-
-    let mut op = vec.accessor();
-    let num = *LARGE_BOUND.get().unwrap();
-    let index = gen_one(0, 36000);
-
-    b.iter(|| {
-        let mut counter = 0u64;
-        op.set_len(36050);
-        op.remove(num % 12 + 35000);
-        op.remove(num % 20 + 20000);
-        op.remove(num % 16 + 10000);
-        op.remove(num % 13);
-        counter += *op.get_mut(hint::black_box(index));
-        hint::black_box(counter)
-    });
-    op.set_len(0);
-}
-
 /// Test `index` efficient, will not reallocate memory.
 ///
 /// The data volume is 14-15.
@@ -608,13 +502,14 @@ fn index_small<T: VecLike>(b: &mut Bencher) {
     let mut op = vec.accessor();
     op.set_len(16);
 
-    let range = SMALL_RANGE.get().unwrap().clone();
-    let index = range[2] as usize;
+    let range = SMALL_RANGE.get().unwrap();
+    let slice: &[usize] = range;
+    let index = range[2];
 
     b.iter(|| {
         let mut counter = 0u64;
-        for item in &range {
-            *op.get_mut(*item as usize) += *item;
+        for item in slice {
+            *op.get_mut(*item) += *item as u64;
         }
         counter += *op.get_mut(index);
         hint::black_box(counter)
@@ -631,13 +526,14 @@ fn index_large<T: VecLike>(b: &mut Bencher) {
     let mut op = vec.accessor();
     op.set_len(36000);
 
-    let range = LARGE_RANGE.get().unwrap().clone();
-    let index = range[2] as usize;
+    let range = LARGE_RANGE.get().unwrap();
+    let slice: &[usize] = range;
+    let index = range[2];
 
     b.iter(|| {
         let mut counter = 0u64;
-        for item in &range {
-            *op.get_mut(*item as usize) += *item;
+        for item in slice {
+            *op.get_mut(*item) += *item as u64;
         }
         counter += *op.get_mut(index);
         hint::black_box(counter)
@@ -648,9 +544,9 @@ fn index_large<T: VecLike>(b: &mut Bencher) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(400)
-        .warm_up_time(core::time::Duration::from_secs(3))
-        .measurement_time(core::time::Duration::from_secs(10))
+        .sample_size(200)
+        .warm_up_time(core::time::Duration::from_secs(1))
+        .measurement_time(core::time::Duration::from_secs(4))
         .confidence_level(0.96)
         .noise_threshold(0.04);
     targets = bench_vec,

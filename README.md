@@ -1,35 +1,21 @@
-# FastVec: Stack-Optimized High-Speed Vector
+# FastVec: SBO Vector
 
-A high-performance vector crate tuned for small data sizes.
+A dynamic array crate optimized for small data.
 
-Favors stack-backed storage to reduce heap allocations and improve CPU cache locality.
+Small-buffer optimization (SBO) stores a tiny inline buffer on the stack and
+avoids heap allocation when the element count stays small. This improves
+runtime in the common case while still allowing growth.
 
-## Container Guide
+Benchmark results are available in [benchmark/README.md](benchmark/README.md).
 
-We provide three containers for different scenarios:
+---
 
-| Container | Storage | Best for |
-|-----------|---------|----------|
-| **StackVec** | Stack-only, fixed capacity | When you need peak performance and know the max element count |
-| **FastVec** | Stack first, auto-switch to heap | When you need peak performance for temporary data |
-| **AutoVec** | Stack first, auto-switch to heap | When you need long-term storage with an unknown but typically small element count |
+## ArrayVec
 
-If you have many elements and need long-term storage, consider using `Vec` directly.
-
-### StackVec
-
-A stack-resident `Vec` that allocates space without initializing data.
-
-**Features:**
-- No heap allocations
-- Extreme array-like performance
-- Vec-compatible API
-- Compile-time fixed capacity, cannot grow
-
-A great replacement for a plain array `[T; N]`.
+**Fully inlined dynamic array** with a compile-time fixed maximum capacity.
 
 ```rust
-let mut vec: StackVec<i32, 10> = StackVec::new();
+let mut vec: ArrayVec<i32, 10> = ArrayVec::new();
 
 vec.push(1);
 vec.push(2);
@@ -39,66 +25,120 @@ assert_eq!(vec.len(), 2);
 assert_eq!(vec.capacity(), 10); // Fixed capacity
 ```
 
-Supports nearly all `Vec` operations (except reallocation).
+Similar to `[T; N]`, but uses a `len` field to track valid elements and allows
+uninitialized trailing slots. The API largely mirrors `Vec`. Any operation that
+exceeds capacity will panic.
 
-See the `StackVec` docs for details.
+You can also store it as `Box<ArrayVec<_, N>>` to keep the fixed capacity on the heap.
 
-### FastVec
+### Features
 
-A `Vec` for temporary data that auto-grows. It prefers the stack and switches to the heap when capacity is insufficient.
+- Zero overhead: array-like access with no branches
+- No heap allocations: data is fully inlined
+- Fixed capacity: cannot grow beyond `N`
 
-**Features:**
-- `!Sync`, generally for temporary data processing
-- Supports capacity growth
-- Stack-first; no heap allocs for small sizes
-- Guaranteed not slower than `Vec` for large sizes
+This container is similar to `arrayvec`'s `ArrayVec`.
 
-This container caches pointers to minimize stack/heap checks, keeping performance from degrading (even on the heap it’s no slower than `Vec`) and outperforming [`SmallVec`](https://docs.rs/smallvec/latest/smallvec).
+### Feature flag
 
-```rust
-let mut vec: FastVec<i32, 5> = fastvec![1, 2, 3];
-assert_eq!(vec.capacity(), 5);
+Disable the crate `arrayvec` feature (enabled by default) to avoid compiling it.
 
-// Auto-grows; switches to heap when needed
-vec.data().extend([4, 5, 6, 7, 8]);
-assert!(!vec.in_stack()); // Now on heap
-assert_eq!(vec, [1, 2, 3, 4, 5, 6, 7, 8])
-```
+---
 
-Pointer caching introduces self-references, so it is `!Sync`. Any data access must first call `data` to obtain the correct `FastVecData` reference.
+## SmallVec
 
-`data` incurs one branch and pointer assignment; typically you should grab the data reference once, use it via references, and only switch when you need to move the data.
-
-See the `FastVec` docs for details.
-
-### AutoVec
-
-A small-data-optimized `Vec` for long-term storage, implemented as an enum of `Vec` and `StackVec`.
-
-**Features:**
-- `Sync + Send`, suitable for long-term storage
-- Supports capacity growth
-- Stack-first; no heap allocs for small sizes
-- Vec-compatible API
-
-Unlike `FastVec`, this container checks stack/heap location on operations
-and is designed similarly to [`SmallVec`](https://docs.rs/smallvec/latest/smallvec).
-It is efficient for small data but may lag `Vec` on large data,
-especially on simple functions like `push/pop`.
+**Classic SBO vector** with a branch to decide whether data is inline or on the heap.
 
 ```rust
-let mut vec: AutoVec<i32, 5> = autovec![1, 2, 3];
-assert_eq!(vec.capacity(), 5);
+let mut vec: SmallVec<i32, 2> = SmallVec::new();
 
-// Auto-grows; switches to heap when needed
-vec.extend([4, 5, 6, 7, 8]);
-assert!(!vec.in_stack()); // Now on heap
-assert_eq!(vec, [1, 2, 3, 4, 5, 6, 7, 8])
+vec.push(1);  // Inline storage
+vec.push(2);  // Inline storage
+vec.push(3);  // Exceeds capacity, moves to heap
+
+assert_eq!(vec, [1, 2, 3]);
 ```
 
-Supports all `Vec` operations without needing `data()`.
+### Features
 
-See the `AutoVec` docs for details.
+- Space efficient: `SmallVec<u64, 2>` has the same size as `Vec<u64>`
+- Automatic growth: switches to heap without user involvement
+- Cold-path optimization: heap path is marked `#[cold]`
+- Branch on access: each access checks storage location
+- Heap access is slightly slower for large data
+
+This container is similar to `smallvec`'s `SmallVec`. Compared to it, this
+crate marks the heap path as `#[cold]`, improving small-size access speed while
+being slightly slower for large data. See [benchmark/README.md](benchmark/README.md)
+for details.
+
+### Feature flag
+
+Disable the crate `smallvec` feature (enabled by default) to avoid compiling it.
+
+---
+
+## FastVec
+
+**Speed-optimized SBO vector** using a cached pointer to avoid per-access branching.
+
+```rust
+let mut vec: FastVec<i32, 2> = FastVec::new();
+let data = vec.data();
+
+data.push(1);
+data.push(2);
+data.push(3);  // Moves to heap automatically
+
+assert_eq!(data.as_slice(), &[1, 2, 3]);
+```
+
+`FastVec` keeps a cached pointer to the current storage, so data access is
+as fast as `Vec` regardless of inline or heap storage. Growing and shrinking
+still requires checks (lightweight; see benchmarks).
+
+### Features
+
+- Constant access speed: matches `Vec` on both stack and heap
+- Heap-friendly: no performance drop after growing
+- Zero extra branch on access
+- Self-referential: internal pointer may point to stack frame; must be refreshed
+- Not `Sync`: uses `Cell` internally
+
+### How it works
+
+`FastVec` uses a two-type design to handle self-references:
+
+- `FastVec`: movable wrapper that refreshes the pointer
+- `FastVecData`: operational handle obtained via `FastVec::data()`
+
+```rust
+let mut vec: FastVec<i32, 4> = [1, 2, 3].into();
+let data = vec.data();
+
+data.push(4);
+data.retain(|x| *x % 2 == 0);
+```
+
+### Feature flag
+
+Disable the crate `fastvec` feature (enabled by default) to avoid compiling it.
+
+---
+
+## Selection Guide
+
+| Feature | ArrayVec | SmallVec | FastVec |
+|---------|----------|----------|---------|
+| **Capacity** | Fixed, no growth | Grows to heap | Grows to heap |
+| **Space efficiency** | High | High | Medium (extra pointer) |
+| **Access overhead** | Zero | Branch per access | Zero (cached pointer) |
+| **Heap performance** | N/A | Lower (cold path) | Same as `Vec` |
+| **Sync** | Yes | Yes | No |
+
+- Max size known, peak performance: use `ArrayVec`
+- Usually small, space-sensitive storage: use `SmallVec`
+- Usually small, performance-sensitive temporary data: use `FastVec`
 
 ## no_std Support
 
@@ -106,11 +146,23 @@ FastVec depends only on `core` and `alloc`, making it ideal for embedded and no_
 
 ## Optional Features
 
+### arrayvec
+
+Enabled by default. If disabled, `ArrayVec` code is not compiled.
+
+### fastvec
+
+Enabled by default. If disabled, `FastVec` code is not compiled.
+
+### smallvec
+
+Enabled by default. If disabled, `SmallVec` code is not compiled.
+
 ### serde
 
-When enabled, `StackVec`, `FastVec` and `AutoVec` implement
-`serde::Serialize` and `serde::Deserialize` .
+When enabled, `ArrayVec`, `FastVec` and `SmallVec` implement
+`serde::Serialize` and `serde::Deserialize`.
 
 ### std
 
-When enabled, `StackVec`, `FastVec` and `AutoVec` implement `std::io::Write` .
+When enabled, `ArrayVec`, `FastVec` and `SmallVec` implement `std::io::Write`.

@@ -3,16 +3,23 @@ extern crate std;
 use core::ptr;
 use std::io::{IoSlice, Write};
 
-use crate::{AutoVec, FastVec, StackVec};
+#[cfg(feature = "fastvec")]
+use crate::FastVec;
 
-/// Write is implemented for `StackVec<u8, N>` by appending to the vector.
+#[cfg(feature = "arrayvec")]
+use crate::ArrayVec;
+
+#[cfg(feature = "smallvec")]
+use crate::SmallVec;
+
+/// Write is implemented for `ArrayVec<u8, N>` by appending to the vector.
 ///
 /// If the vector is full, [`Write::write`] will return `Ok(0)`.
-#[cfg(feature = "std")]
-impl<const N: usize> Write for StackVec<u8, N> {
+#[cfg(all(feature = "arrayvec"))]
+impl<const N: usize> Write for ArrayVec<u8, N> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let len = self.len;
+        let len = self.len();
         let num = core::cmp::min(N - len, buf.len());
 
         unsafe {
@@ -43,7 +50,7 @@ impl<const N: usize> Write for StackVec<u8, N> {
 
 /// Write is implemented for `FastVec<u8, N>` by appending to the vector.
 /// The vector will grow as needed.
-#[cfg(feature = "std")]
+#[cfg(all(feature = "fastvec"))]
 impl<const N: usize> Write for FastVec<u8, N> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -92,10 +99,10 @@ impl<const N: usize> Write for FastVec<u8, N> {
     }
 }
 
-/// Write is implemented for `AutoVec<u8, N>` by appending to the vector.
+/// Write is implemented for `SmallVec<u8, N>` by appending to the vector.
 /// The vector will grow as needed.
-#[cfg(feature = "std")]
-impl<const N: usize> Write for AutoVec<u8, N> {
+#[cfg(all(feature = "smallvec"))]
+impl<const N: usize> Write for SmallVec<u8, N> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let len = self.len();
@@ -147,8 +154,9 @@ mod tests {
     use std::io::{IoSlice, Write};
 
     #[test]
-    fn stackvec_write_basic_and_partial() {
-        let mut v: StackVec<u8, 4> = StackVec::new();
+    #[cfg(feature = "arrayvec")]
+    fn arrayvec_write_basic_and_partial() {
+        let mut v: ArrayVec<u8, 4> = ArrayVec::new();
         // First write fits entirely
         let n = v.write(b"ab").unwrap();
         assert_eq!(n, 2);
@@ -167,8 +175,9 @@ mod tests {
     }
 
     #[test]
-    fn stackvec_write_vectored_partial_stop_on_full() {
-        let mut v: StackVec<u8, 5> = StackVec::new();
+    #[cfg(feature = "arrayvec")]
+    fn arrayvec_write_vectored_partial_stop_on_full() {
+        let mut v: ArrayVec<u8, 5> = ArrayVec::new();
         let bufs = [
             IoSlice::new(b"ab"),
             IoSlice::new(b"cde"),
@@ -180,6 +189,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "fastvec")]
     fn fastvec_write_and_vectored() {
         let mut v: FastVec<u8, 4> = FastVec::new();
 
@@ -195,6 +205,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "fastvec")]
     fn fastvec_write_all_grows() {
         let mut v: FastVec<u8, 3> = FastVec::new();
         let data = [b'x'; 257];
@@ -204,8 +215,9 @@ mod tests {
     }
 
     #[test]
-    fn autovec_write_and_vectored() {
-        let mut v: AutoVec<u8, 4> = AutoVec::new();
+    #[cfg(feature = "smallvec")]
+    fn smallvec_write_and_vectored() {
+        let mut v: SmallVec<u8, 4> = SmallVec::new();
 
         let n = v.write(b"hello").unwrap();
         assert_eq!(n, 5);
@@ -219,8 +231,9 @@ mod tests {
     }
 
     #[test]
-    fn autovec_write_all_grows() {
-        let mut v: AutoVec<u8, 3> = AutoVec::new();
+    #[cfg(feature = "smallvec")]
+    fn smallvec_write_all_grows() {
+        let mut v: SmallVec<u8, 3> = SmallVec::new();
         let data = [b'y'; 257];
         v.write_all(&data).unwrap();
         assert_eq!(v.len(), 257);

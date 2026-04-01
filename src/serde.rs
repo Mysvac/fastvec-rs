@@ -1,13 +1,21 @@
-use crate::{AutoVec, FastVec, StackVec};
 use alloc::format;
 use core::marker::PhantomData;
 use serde_core::de::{self, SeqAccess, Visitor};
 use serde_core::ser::SerializeSeq;
 use serde_core::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[cfg(feature = "serde")]
-impl<T: Serialize, const N: usize> Serialize for StackVec<T, N> {
-    /// Serialize a [`StackVec`] as a sequence.
+#[cfg(feature = "arrayvec")]
+use crate::ArrayVec;
+
+#[cfg(feature = "fastvec")]
+use crate::FastVec;
+
+#[cfg(feature = "smallvec")]
+use crate::SmallVec;
+
+#[cfg(all(feature = "arrayvec", feature = "serde"))]
+impl<T: Serialize, const N: usize> Serialize for ArrayVec<T, N> {
+    /// Serialize a [`ArrayVec`] as a sequence.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -20,7 +28,7 @@ impl<T: Serialize, const N: usize> Serialize for StackVec<T, N> {
     }
 }
 
-#[cfg(feature = "serde")]
+#[cfg(all(feature = "fastvec", feature = "serde"))]
 impl<T: Serialize, const N: usize> Serialize for FastVec<T, N> {
     /// Serialize a [`FastVec`] as a sequence.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -35,9 +43,9 @@ impl<T: Serialize, const N: usize> Serialize for FastVec<T, N> {
     }
 }
 
-#[cfg(feature = "serde")]
-impl<T: Serialize, const N: usize> Serialize for AutoVec<T, N> {
-    /// Serialize an [`AutoVec`] as a sequence.
+#[cfg(all(feature = "smallvec", feature = "serde"))]
+impl<T: Serialize, const N: usize> Serialize for SmallVec<T, N> {
+    /// Serialize an [`SmallVec`] as a sequence.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -50,23 +58,23 @@ impl<T: Serialize, const N: usize> Serialize for AutoVec<T, N> {
     }
 }
 
-#[cfg(feature = "serde")]
-impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for StackVec<T, N> {
-    /// Deserialize a [`StackVec`] from a sequence.
+#[cfg(all(feature = "arrayvec", feature = "serde"))]
+impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for ArrayVec<T, N> {
+    /// Deserialize a [`ArrayVec`] from a sequence.
     ///
     /// # Panics
-    /// Panics if the sequence length exceeds the stack capacity `N`.
+    /// Panics if the sequence length exceeds the inline capacity `N`.
     #[inline]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct StackVecVisitor<T, const N: usize> {
+        struct ArrayVecVisitor<T, const N: usize> {
             _marker: PhantomData<T>,
         }
 
-        impl<'de, T: Deserialize<'de>, const N: usize> Visitor<'de> for StackVecVisitor<T, N> {
-            type Value = StackVec<T, N>;
+        impl<'de, T: Deserialize<'de>, const N: usize> Visitor<'de> for ArrayVecVisitor<T, N> {
+            type Value = ArrayVec<T, N>;
 
             fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
                 formatter.write_str("a sequence")
@@ -76,14 +84,14 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for StackVec<T, 
             where
                 A: SeqAccess<'de>,
             {
-                let mut vec = StackVec::new();
+                let mut vec = ArrayVec::new();
 
                 while let Some(element) = seq.next_element()? {
                     if vec.len() < N {
                         vec.push(element);
                     } else {
                         return Err(de::Error::custom(format!(
-                            "StackVec capacity {} exceeded while deserializing sequence",
+                            "ArrayVec inline capacity {} exceeded while deserializing sequence",
                             N
                         )));
                     }
@@ -93,17 +101,17 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for StackVec<T, 
             }
         }
 
-        deserializer.deserialize_seq(StackVecVisitor {
+        deserializer.deserialize_seq(ArrayVecVisitor {
             _marker: PhantomData,
         })
     }
 }
 
-#[cfg(feature = "serde")]
+#[cfg(all(feature = "fastvec", feature = "serde"))]
 impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for FastVec<T, N> {
     /// Deserialize an [`FastVec`] from a sequence.
     ///
-    /// If the sequence length exceeds the stack capacity `N`, the data will be stored on the heap.
+    /// If the sequence length exceeds the inline capacity `N`, the data will be stored on the heap.
     #[inline]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -145,22 +153,22 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for FastVec<T, N
     }
 }
 
-#[cfg(feature = "serde")]
-impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for AutoVec<T, N> {
-    /// Deserialize an [`AutoVec`] from a sequence.
+#[cfg(all(feature = "smallvec", feature = "serde"))]
+impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for SmallVec<T, N> {
+    /// Deserialize an [`SmallVec`] from a sequence.
     ///
-    /// If the sequence length exceeds the stack capacity `N`, the data will be stored on the heap.
+    /// If the sequence length exceeds the inline capacity `N`, the data will be stored on the heap.
     #[inline]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct AutoVecVisitor<T, const N: usize> {
+        struct SmallVecVisitor<T, const N: usize> {
             _marker: PhantomData<T>,
         }
 
-        impl<'de, T: Deserialize<'de>, const N: usize> Visitor<'de> for AutoVecVisitor<T, N> {
-            type Value = AutoVec<T, N>;
+        impl<'de, T: Deserialize<'de>, const N: usize> Visitor<'de> for SmallVecVisitor<T, N> {
+            type Value = SmallVec<T, N>;
 
             fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
                 formatter.write_str("a sequence")
@@ -171,8 +179,8 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for AutoVec<T, N
                 A: SeqAccess<'de>,
             {
                 let mut vec = match seq.size_hint() {
-                    Some(hint) => AutoVec::with_capacity(hint),
-                    None => AutoVec::new(),
+                    Some(hint) => SmallVec::with_capacity(hint),
+                    None => SmallVec::new(),
                 };
 
                 while let Some(element) = seq.next_element::<T>()? {
@@ -183,7 +191,7 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for AutoVec<T, N
             }
         }
 
-        deserializer.deserialize_seq(AutoVecVisitor {
+        deserializer.deserialize_seq(SmallVecVisitor {
             _marker: PhantomData,
         })
     }

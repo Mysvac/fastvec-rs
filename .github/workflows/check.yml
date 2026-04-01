@@ -22,7 +22,7 @@ jobs:
           components: rustfmt
 
       - name: Run cargo fmt check
-        run: cargo fmt --check
+        run: cargo fmt --check --all
 
       - name: Run cargo test
         run: cargo test --verbose --features=serde,std
