@@ -12,6 +12,8 @@ use core::panic::{RefUnwindSafe, UnwindSafe};
 use core::ptr::NonNull;
 use core::{ptr, slice};
 
+use crate::utils::min_cap;
+
 use super::utils::{IsZST, split_range_bound};
 
 const MAX_CAP: usize = usize::MAX >> 1;
@@ -532,7 +534,7 @@ impl<T, const N: usize> FastVecData<T, N> {
         let len = self.len();
         let target = len.saturating_add(additional);
         if target > cap {
-            self.realloc(target.min(MARKER).next_power_of_two());
+            self.realloc(min_cap::<T>().max(target).min(MARKER).next_power_of_two());
         }
     }
 

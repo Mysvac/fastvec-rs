@@ -24,5 +24,30 @@ jobs:
       - name: Run cargo fmt check
         run: cargo fmt --check --all
 
-      - name: Run cargo test
-        run: cargo test --verbose --features=serde,std
+      - name: Run cargo test (no default features)
+        run: cargo test --verbose --no-default-features
+
+      - name: Run cargo test (fastvec only)
+        run: cargo test --verbose --no-default-features --features=fastvec
+
+      - name: Run cargo test (fastvec, serde, std)
+        run: cargo test --verbose --no-default-features --features=fastvec,serde,std
+
+      - name: Run cargo test (smallvec only)
+        run: cargo test --verbose --no-default-features --features=smallvec
+
+      - name: Run cargo test (smallvec, serde, std)
+        run: cargo test --verbose --no-default-features --features=smallvec,serde,std
+
+      - name: Run cargo test (arrayvec only)
+        run: cargo test --verbose --no-default-features --features=arrayvec
+
+      - name: Run cargo test (arrayvec, serde, std)
+        run: cargo test --verbose --no-default-features --features=arrayvec,serde,std
+
+      - name: Run cargo test (default features only)
+        run: cargo test --verbose
+
+      - name: Run cargo test (all feature)
+        run: cargo test --verbose --all-features
+

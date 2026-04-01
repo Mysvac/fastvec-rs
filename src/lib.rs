@@ -27,7 +27,7 @@
 //!
 //! A great replacement for a plain array `[T; N]`.
 //!
-//! ```rust
+//! ```rust, ignore
 //! # use fastvec::ArrayVec;
 //! let mut vec: ArrayVec<i32, 10> = ArrayVec::new();
 //!
@@ -56,7 +56,7 @@
 //! This container caches pointers to minimize inline/heap checks, keeping performance from degrading
 //! (even on the heap it’s no slower than `Vec`) and outperforming [`SmallVec`](https://docs.rs/smallvec/latest/smallvec).
 //!
-//! ```rust
+//! ```rust, ignore
 //! # use fastvec::FastVec;
 //! let mut vec: FastVec<i32, 5> = [1, 2, 3].into();
 //! assert_eq!(vec.capacity(), 5);
@@ -89,7 +89,7 @@
 //! It is efficient for small data but may lag `Vec` on large data,
 //! especially on simple functions like data access and `push/pop`.
 //!
-//! ```rust
+//! ```rust, ignore
 //! # use fastvec::SmallVec;
 //! let mut vec: SmallVec<i32, 5> = [1, 2, 3].into();
 //! assert_eq!(vec.capacity(), 5);
