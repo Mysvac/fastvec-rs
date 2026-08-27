@@ -236,13 +236,18 @@ impl<T, const N: usize> ArrayVec<T, N> {
     /// ```
     #[inline]
     pub fn clear(&mut self) {
+        // Retire the elements before destroying them. If `T::drop` panics they
+        // are already outside `0..len`, so the vector's own `Drop` cannot
+        // destroy them a second time.
+        let len = self.len;
+        self.len = 0;
+
         if core::mem::needs_drop::<T>() {
             unsafe {
-                let slice: &mut [T] = self.as_mut_slice();
-                ptr::drop_in_place::<[T]>(slice);
+                let to_drop = ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), len);
+                ptr::drop_in_place::<[T]>(to_drop);
             }
         }
-        self.len = 0;
     }
 
     /// Shortens the vector, keeping the first `len` elements
@@ -261,16 +266,16 @@ impl<T, const N: usize> ArrayVec<T, N> {
     #[inline]
     pub fn truncate(&mut self, len: usize) {
         if self.len > len {
+            let old_len = self.len;
+            self.len = len;
+
             if core::mem::needs_drop::<T>() {
                 unsafe {
                     let data = self.as_mut_ptr().add(len);
-                    let len = self.len - len;
-                    let to_drop = ptr::slice_from_raw_parts_mut(data, len);
+                    let to_drop = ptr::slice_from_raw_parts_mut(data, old_len - len);
                     ptr::drop_in_place::<[T]>(to_drop);
                 }
             }
-
-            self.len = len;
         }
     }
 }
@@ -704,9 +709,12 @@ impl<T, const N: usize> ArrayVec<T, N> {
     /// assert_eq!(vec, [11, 13]);
     /// ```
     pub fn retain_mut<F: FnMut(&mut T) -> bool>(&mut self, mut f: F) {
-        let mut count = 0usize;
         let base_ptr = self.as_mut_ptr();
-        for index in 0..self.len {
+        let len = self.len;
+        self.len = 0; // Ensure safety if panicked
+        let mut count = 0usize;
+
+        for index in 0..len {
             unsafe {
                 let dst = base_ptr.add(index);
                 if f(&mut *dst) {
@@ -1600,5 +1608,89 @@ mod tests {
 
         drop(vec);
         assert_eq!(DROPS.load(Ordering::SeqCst), 6);
+    }
+
+    /// A panicking `Drop` must not leave already-destroyed elements inside
+    /// `0..len`, and a panicking predicate must not leave a duplicate there.
+    #[cfg(feature = "std")]
+    #[test]
+    fn panic_safety_does_not_double_free() {
+        extern crate std;
+        use core::cell::Cell;
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        std::thread_local! {
+            static DROPS: Cell<usize> = const { Cell::new(0) };
+            static ARMED: Cell<bool> = const { Cell::new(false) };
+        }
+
+        struct Boom(i32);
+
+        impl Drop for Boom {
+            fn drop(&mut self) {
+                DROPS.with(|d| d.set(d.get() + 1));
+                if ARMED.with(|a| a.replace(false)) {
+                    panic!("element Drop panics");
+                }
+            }
+        }
+
+        fn fill() -> ArrayVec<Boom, 8> {
+            let mut v = ArrayVec::new();
+            for i in 0..4 {
+                v.push(Boom(i));
+            }
+            v
+        }
+
+        // `clear` with a panicking element `Drop`.
+        DROPS.with(|d| d.set(0));
+        {
+            let mut v = fill();
+            ARMED.with(|a| a.set(true));
+            let r = catch_unwind(AssertUnwindSafe(|| v.clear()));
+            ARMED.with(|a| a.set(false));
+            assert!(r.is_err(), "clear: the armed Drop should have panicked");
+        }
+        // Four elements exist. Fewer drops mean a leak, which is sound; more
+        // mean an element was destroyed twice.
+        assert!(
+            DROPS.with(|d| d.get()) <= 4,
+            "clear: {} drops for 4 elements",
+            DROPS.with(|d| d.get())
+        );
+
+        // `truncate` with a panicking element `Drop`.
+        DROPS.with(|d| d.set(0));
+        {
+            let mut v = fill();
+            ARMED.with(|a| a.set(true));
+            let r = catch_unwind(AssertUnwindSafe(|| v.truncate(1)));
+            ARMED.with(|a| a.set(false));
+            assert!(r.is_err(), "truncate: the armed Drop should have panicked");
+        }
+        assert!(
+            DROPS.with(|d| d.get()) <= 4,
+            "truncate: {} drops for 4 elements",
+            DROPS.with(|d| d.get())
+        );
+
+        // `retain_mut` with a panicking predicate, after a compaction.
+        DROPS.with(|d| d.set(0));
+        {
+            let mut v = fill();
+            let r = catch_unwind(AssertUnwindSafe(|| {
+                v.retain_mut(|e| {
+                    assert_ne!(e.0, 2, "predicate panics");
+                    e.0 != 0
+                })
+            }));
+            assert!(r.is_err(), "retain_mut: the predicate should have panicked");
+        }
+        assert!(
+            DROPS.with(|d| d.get()) <= 4,
+            "retain_mut: {} drops for 4 elements",
+            DROPS.with(|d| d.get())
+        );
     }
 }
