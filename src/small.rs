@@ -282,13 +282,15 @@ impl<T, const N: usize> SmallVec<T, N> {
     /// assert_eq!(vec.capacity(), cap);
     /// ```
     pub fn clear(&mut self) {
+        let len = self.len_and_flag & MAX_LEN;
+        self.len_and_flag &= MARKER;
+
         if core::mem::needs_drop::<T>() {
             unsafe {
-                let slice: &mut [T] = self.as_mut_slice();
-                ptr::drop_in_place::<[T]>(slice);
+                let to_drop = ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), len);
+                ptr::drop_in_place::<[T]>(to_drop);
             }
         }
-        self.len_and_flag &= MARKER;
     }
 
     /// Shortens the vector, keeping the first `len` elements
@@ -309,16 +311,15 @@ impl<T, const N: usize> SmallVec<T, N> {
         let old_len = old & MAX_LEN;
 
         if old_len > len {
+            self.len_and_flag = (old & MARKER) | len;
+
             if core::mem::needs_drop::<T>() {
                 unsafe {
                     let data = self.as_mut_ptr().add(len);
-                    let len = old_len - len;
-                    let to_drop = ptr::slice_from_raw_parts_mut(data, len);
+                    let to_drop = ptr::slice_from_raw_parts_mut(data, old_len - len);
                     ptr::drop_in_place::<[T]>(to_drop)
                 }
             }
-
-            self.len_and_flag = (old & MARKER) | len;
         }
     }
 }
@@ -1912,5 +1913,67 @@ mod tests {
 
         drop(vec);
         assert_eq!(DROPS.load(Ordering::SeqCst), 6);
+    }
+
+    /// A panicking element `Drop` must not leave already-destroyed elements
+    /// inside the live range.
+    #[cfg(feature = "std")]
+    #[test]
+    fn panic_safety_does_not_double_free() {
+        extern crate std;
+        use core::cell::Cell;
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        std::thread_local! {
+            static DROPS: Cell<usize> = const { Cell::new(0) };
+            static ARMED: Cell<bool> = const { Cell::new(false) };
+        }
+
+        struct Boom(#[allow(dead_code)] i32);
+
+        impl Drop for Boom {
+            fn drop(&mut self) {
+                DROPS.with(|d| d.set(d.get() + 1));
+                if ARMED.with(|a| a.replace(false)) {
+                    panic!("element Drop panics");
+                }
+            }
+        }
+
+        fn fill() -> SmallVec<Boom, 8> {
+            let mut v = SmallVec::new();
+            for i in 0..4 {
+                v.push(Boom(i));
+            }
+            v
+        }
+
+        DROPS.with(|d| d.set(0));
+        {
+            let mut v = fill();
+            ARMED.with(|a| a.set(true));
+            let r = catch_unwind(AssertUnwindSafe(|| v.clear()));
+            ARMED.with(|a| a.set(false));
+            assert!(r.is_err(), "clear: the armed Drop should have panicked");
+        }
+        assert!(
+            DROPS.with(|d| d.get()) <= 4,
+            "clear: {} drops for 4 elements",
+            DROPS.with(|d| d.get())
+        );
+
+        DROPS.with(|d| d.set(0));
+        {
+            let mut v = fill();
+            ARMED.with(|a| a.set(true));
+            let r = catch_unwind(AssertUnwindSafe(|| v.truncate(1)));
+            ARMED.with(|a| a.set(false));
+            assert!(r.is_err(), "truncate: the armed Drop should have panicked");
+        }
+        assert!(
+            DROPS.with(|d| d.get()) <= 4,
+            "truncate: {} drops for 4 elements",
+            DROPS.with(|d| d.get())
+        );
     }
 }
