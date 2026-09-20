@@ -1617,7 +1617,7 @@ mod tests {
     fn panic_safety_does_not_double_free() {
         extern crate std;
         use core::cell::Cell;
-        use std::panic::{catch_unwind, AssertUnwindSafe};
+        use std::panic::{AssertUnwindSafe, catch_unwind};
 
         std::thread_local! {
             static DROPS: Cell<usize> = const { Cell::new(0) };

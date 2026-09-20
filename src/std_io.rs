@@ -15,7 +15,7 @@ use crate::SmallVec;
 /// Write is implemented for `ArrayVec<u8, N>` by appending to the vector.
 ///
 /// If the vector is full, [`Write::write`] will return `Ok(0)`.
-#[cfg(all(feature = "arrayvec"))]
+#[cfg(all(feature = "arrayvec", feature = "serde"))]
 impl<const N: usize> Write for ArrayVec<u8, N> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -50,7 +50,7 @@ impl<const N: usize> Write for ArrayVec<u8, N> {
 
 /// Write is implemented for `FastVec<u8, N>` by appending to the vector.
 /// The vector will grow as needed.
-#[cfg(all(feature = "fastvec"))]
+#[cfg(all(feature = "fastvec", feature = "serde"))]
 impl<const N: usize> Write for FastVec<u8, N> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -101,7 +101,7 @@ impl<const N: usize> Write for FastVec<u8, N> {
 
 /// Write is implemented for `SmallVec<u8, N>` by appending to the vector.
 /// The vector will grow as needed.
-#[cfg(all(feature = "smallvec"))]
+#[cfg(all(feature = "smallvec", feature = "serde"))]
 impl<const N: usize> Write for SmallVec<u8, N> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
